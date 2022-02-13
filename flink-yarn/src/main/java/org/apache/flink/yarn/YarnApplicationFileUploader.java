@@ -101,7 +101,7 @@ class YarnApplicationFileUploader implements AutoCloseable {
         this.localResources = new HashMap<>();
         this.applicationDir = getApplicationDir(applicationId);
         checkArgument(
-                !isUsrLibDirIncludedInProvidedLib(providedLibDirs),
+                !isUsrLibDirIncludedInProvidedLibDirs(providedLibDirs),
                 "Provided lib directories, configured via %s, should not include %s.",
                 YarnConfigOptions.PROVIDED_LIB_DIRS.key(),
                 ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR);
@@ -511,14 +511,10 @@ class YarnApplicationFileUploader implements AutoCloseable {
         return Collections.unmodifiableMap(allFiles);
     }
 
-    private boolean isUsrLibDirIncludedInProvidedLib(final List<Path> providedLibDirs)
+    private boolean isUsrLibDirIncludedInProvidedLibDirs(final List<Path> providedLibDirs)
             throws IOException {
         for (Path path : providedLibDirs) {
-            final FileStatus fileStatus = fileSystem.getFileStatus(path);
-            // Use the Path obj from fileStatus to get rid of trailing slash
-            if (fileStatus.isDirectory()
-                    && ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR.equals(
-                            fileStatus.getPath().getName())) {
+            if (Utils.isUsrLibIncludedInPath(fileSystem, path)) {
                 return true;
             }
         }
