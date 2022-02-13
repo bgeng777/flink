@@ -19,6 +19,7 @@
 package org.apache.flink.yarn;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.ConfigUtils;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
 import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameters;
@@ -67,6 +68,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 import static org.apache.flink.yarn.YarnConfigKeys.ENV_FLINK_CLASSPATH;
 import static org.apache.flink.yarn.YarnConfigKeys.LOCAL_RESOURCE_DESCRIPTOR_SEPARATOR;
@@ -645,32 +647,63 @@ public final class Utils {
             throws IOException, FlinkException {
 
         return getRemoteSharedPaths(
-                configuration,
-                pathStr -> {
-                    final Path path = new Path(pathStr);
-                    return path.getFileSystem(yarnConfiguration).makeQualified(path);
-                });
+                configuration, pathStr -> strToPathMapper(pathStr, yarnConfiguration));
+    }
+
+    private static Path strToPathMapper(String pathStr, YarnConfiguration yarnConfiguration)
+            throws IOException {
+        final Path path = new Path(pathStr);
+        return path.getFileSystem(yarnConfiguration).makeQualified(path);
+    }
+
+    public static Path getQualifiedRemoteUsrLib(
+            org.apache.flink.configuration.Configuration configuration,
+            YarnConfiguration yarnConfiguration)
+            throws IOException {
+        final String pathStr = configuration.getString(YarnConfigOptions.PROVIDED_USRLIB_DIR);
+        if (pathStr == null) {
+            return null;
+        }
+        final Path providedUsrLibPath = strToPathMapper(pathStr, yarnConfiguration);
+        checkArgument(
+                isUsrLibIncludedInPath(
+                                providedUsrLibPath.getFileSystem(yarnConfiguration),
+                                providedUsrLibPath)
+                        && isRemotePath(providedUsrLibPath.toString()),
+                "The %s must point to a dir named with %s "
+                        + "\" and the dir should be accessible from all worker nodes, while the %s is local.",
+                YarnConfigOptions.PROVIDED_USRLIB_DIR.key(),
+                ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR,
+                providedUsrLibPath);
+        return providedUsrLibPath;
+    }
+
+    public static boolean isUsrLibIncludedInPath(final FileSystem fileSystem, final Path path)
+            throws IOException {
+        final FileStatus fileStatus = fileSystem.getFileStatus(path);
+        // Use the Path obj from fileStatus to get rid of trailing slash
+        return fileStatus.isDirectory()
+                && ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR.equals(fileStatus.getPath().getName());
     }
 
     private static List<Path> getRemoteSharedPaths(
             org.apache.flink.configuration.Configuration configuration,
             FunctionWithException<String, Path, IOException> strToPathMapper)
-            throws IOException, FlinkException {
+            throws IOException {
 
         final List<Path> providedLibDirs =
                 ConfigUtils.decodeListFromConfig(
                         configuration, YarnConfigOptions.PROVIDED_LIB_DIRS, strToPathMapper);
 
         for (Path path : providedLibDirs) {
-            if (!Utils.isRemotePath(path.toString())) {
-                throw new FlinkException(
-                        "The \""
-                                + YarnConfigOptions.PROVIDED_LIB_DIRS.key()
-                                + "\" should only contain"
-                                + " dirs accessible from all worker nodes, while the \""
-                                + path
-                                + "\" is local.");
-            }
+            checkArgument(
+                    Utils.isRemotePath(path.toString()),
+                    "The \""
+                            + YarnConfigOptions.PROVIDED_LIB_DIRS.key()
+                            + "\" should only contain"
+                            + " dirs accessible from all worker nodes, while the \""
+                            + path
+                            + "\" is local.");
         }
         return providedLibDirs;
     }

@@ -798,6 +798,9 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
         final List<Path> providedLibDirs =
                 Utils.getQualifiedRemoteSharedPaths(configuration, yarnConfiguration);
 
+        final Path providedUsrLibDir =
+                Utils.getQualifiedRemoteUsrLib(configuration, yarnConfiguration);
+
         Path stagingDirPath = getStagingDir(fs);
         FileSystem stagingDirFs = stagingDirPath.getFileSystem(yarnConfiguration);
         final YarnApplicationFileUploader fileUploader =
@@ -919,8 +922,17 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
                                 : Path.CUR_DIR,
                         LocalResourceType.FILE);
 
-        // usrlib will be automatically shipped if it exists.
-        if (ClusterEntrypointUtils.tryFindUserLibDirectory().isPresent()) {
+        // usrlib in remote will be used first.
+        if (providedUsrLibDir != null) {
+            final List<String> usrLibClassPaths =
+                    fileUploader.registerMultipleLocalResources(
+                            Collections.singletonList(providedUsrLibDir),
+                            Path.CUR_DIR,
+                            LocalResourceType.FILE);
+            userClassPaths.addAll(usrLibClassPaths);
+        } else if (ClusterEntrypointUtils.tryFindUserLibDirectory().isPresent()) {
+            // local usrlib will be automatically shipped if it exists and there is no remote
+            // usrlib.
             final Set<File> usrLibShipFiles = new HashSet<>();
             addUsrLibFolderToShipFiles(usrLibShipFiles);
             final List<String> usrLibClassPaths =
