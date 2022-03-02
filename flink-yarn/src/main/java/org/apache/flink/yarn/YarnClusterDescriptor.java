@@ -123,6 +123,7 @@ import static org.apache.flink.configuration.ConfigConstants.ENV_FLINK_LIB_DIR;
 import static org.apache.flink.runtime.entrypoint.component.FileJobGraphRetriever.JOB_GRAPH_FILE_PATH;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.flink.yarn.YarnConfigKeys.ENV_FLINK_CLASSPATH;
 import static org.apache.flink.yarn.YarnConfigKeys.LOCAL_RESOURCE_DESCRIPTOR_SEPARATOR;
 
 /** The descriptor with deployment information for deploying a Flink cluster on Yarn. */
@@ -1828,5 +1829,41 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
                         + "Note that killing Flink might not clean up all job artifacts and temporary files.",
                 yarnApplicationId,
                 yarnApplicationId);
+    }
+
+
+    @VisibleForTesting
+    Map<String, String> generateApplicationMasterEnv(
+            final YarnApplicationFileUploader fileUploader,
+            final String classPathStr,
+            final String localFlinkJarStr,
+            final String appIdStr)
+            throws IOException {
+        final Map<String, String> env = new HashMap<>();
+        // set user specified app master environment variables
+        env.putAll(
+                ConfigurationUtils.getPrefixedKeyValuePairs(
+                        ResourceManagerOptions.CONTAINERIZED_MASTER_ENV_PREFIX,
+                        this.flinkConfiguration));
+        // set Flink app class path
+        env.put(ENV_FLINK_CLASSPATH, classPathStr);
+        // set Flink on YARN internal configuration values
+        env.put(YarnConfigKeys.FLINK_DIST_JAR, localFlinkJarStr);
+        env.put(YarnConfigKeys.ENV_APP_ID, appIdStr);
+        env.put(YarnConfigKeys.ENV_CLIENT_HOME_DIR, fileUploader.getHomeDir().toString());
+        env.put(
+                YarnConfigKeys.ENV_CLIENT_SHIP_FILES,
+                encodeYarnLocalResourceDescriptorListToString(
+                        fileUploader.getEnvShipResourceList()));
+        env.put(
+                YarnConfigKeys.FLINK_YARN_FILES,
+                fileUploader.getApplicationDir().toUri().toString());
+        // https://github.com/apache/hadoop/blob/trunk/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-site/src/site/markdown/YarnApplicationSecurity.md#identity-on-an-insecure-cluster-hadoop_user_name
+        env.put(
+                YarnConfigKeys.ENV_HADOOP_USER_NAME,
+                UserGroupInformation.getCurrentUser().getUserName());
+        // set classpath from YARN configuration
+        Utils.setupYarnClassPath(this.yarnConfiguration, env);
+        return env;
     }
 }
