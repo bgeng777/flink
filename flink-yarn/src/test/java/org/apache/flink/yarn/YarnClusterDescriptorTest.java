@@ -846,7 +846,7 @@ public class YarnClusterDescriptorTest extends TestLogger {
         assertEquals(appId.toString(), masterEnv.get(YarnConfigKeys.ENV_APP_ID));
         assertEquals(
                 YarnApplicationFileUploader.getApplicationDirPath(
-                        new Path(flinkHomeDir.getPath()), appId)
+                                new Path(flinkHomeDir.getPath()), appId)
                         .toString(),
                 masterEnv.get(YarnConfigKeys.FLINK_YARN_FILES));
         assertEquals(fakeClassPath, masterEnv.get(YarnConfigKeys.ENV_FLINK_CLASSPATH));
@@ -855,12 +855,31 @@ public class YarnClusterDescriptorTest extends TestLogger {
         assertEquals(flinkHomeDir.getPath(), masterEnv.get(YarnConfigKeys.ENV_CLIENT_HOME_DIR));
     }
 
+    @Test
+    public void testEnvFlinkLibDirVarNotOverriddenBySystem() throws IOException {
+        final Map<String, String> oldEnv = System.getenv();
+        try {
+            Map<String, String> env = new HashMap<>(1);
+            env.put(ConfigConstants.ENV_FLINK_LIB_DIR, "fake_path");
+            CommonTestUtils.setEnv(env);
+            final Map<String, String> masterEnv =
+                    getTestMasterEnv(
+                            temporaryFolder.newFolder(),
+                            "./lib/flink_dist.jar",
+                            "",
+                            ApplicationId.newInstance(0, 0));
+            assertEquals("./lib", masterEnv.get(ConfigConstants.ENV_FLINK_LIB_DIR));
+        } finally {
+            CommonTestUtils.setEnv(oldEnv);
+        }
+    }
+
     private Map<String, String> getTestMasterEnv(
             File flinkHomeDir, String fakeLocalFlinkJar, String fakeClassPath, ApplicationId appId)
             throws IOException {
         final Configuration flinkConfig = new Configuration();
         try (final YarnClusterDescriptor yarnClusterDescriptor =
-                     createYarnClusterDescriptor(flinkConfig)) {
+                createYarnClusterDescriptor(flinkConfig)) {
             final YarnApplicationFileUploader yarnApplicationFileUploader =
                     YarnApplicationFileUploader.from(
                             FileSystem.get(new YarnConfiguration()),
