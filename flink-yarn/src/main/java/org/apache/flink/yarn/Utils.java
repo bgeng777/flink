@@ -24,9 +24,7 @@ import org.apache.flink.configuration.ConfigUtils;
 import org.apache.flink.runtime.clusterframework.BootstrapTools;
 import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameters;
 import org.apache.flink.runtime.util.HadoopUtils;
-import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.StringUtils;
-import org.apache.flink.util.function.FunctionWithException;
 import org.apache.flink.yarn.configuration.YarnConfigOptions;
 import org.apache.flink.yarn.configuration.YarnResourceManagerDriverConfiguration;
 
@@ -59,6 +57,8 @@ import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -642,39 +642,59 @@ public final class Utils {
     }
 
     public static List<Path> getQualifiedRemoteSharedPaths(
-            org.apache.flink.configuration.Configuration configuration,
-            YarnConfiguration yarnConfiguration)
-            throws IOException, FlinkException {
+            List<String> rawPaths, String configOptionKey, YarnConfiguration yarnConfiguration)
+            throws IOException, URISyntaxException {
 
-        return getRemoteSharedPaths(
-                configuration, pathStr -> strToPathMapper(pathStr, yarnConfiguration));
+        final List<Path> providedDirs = new ArrayList<>();
+        for (String rawPath : rawPaths) {
+            providedDirs.add(strToPathMapper(rawPath, yarnConfiguration));
+        }
+        return validateRemoteSharedPaths(providedDirs, configOptionKey);
     }
 
     private static Path strToPathMapper(String pathStr, YarnConfiguration yarnConfiguration)
-            throws IOException {
+            throws IOException, URISyntaxException {
         final Path path = new Path(pathStr);
         return path.getFileSystem(yarnConfiguration).makeQualified(path);
     }
 
-    public static Path getQualifiedRemoteUsrLib(
+    public static List<Path> getQualifiedRemoteProvidedLibDirs(
             org.apache.flink.configuration.Configuration configuration,
             YarnConfiguration yarnConfiguration)
-            throws IOException {
-        final String pathStr = configuration.getString(YarnConfigOptions.PROVIDED_USRLIB_DIR);
-        if (pathStr == null) {
+            throws IOException, URISyntaxException {
+        final List<String> providedDirs =
+                ConfigUtils.decodeListFromConfig(
+                        configuration, YarnConfigOptions.PROVIDED_LIB_DIRS, String::toString);
+        return getQualifiedRemoteSharedPaths(
+                providedDirs, YarnConfigOptions.PROVIDED_LIB_DIRS.key(), yarnConfiguration);
+    }
+
+    public static Path getQualifiedRemoteProvidedUsrLib(
+            org.apache.flink.configuration.Configuration configuration,
+            YarnConfiguration yarnConfiguration)
+            throws IOException, IllegalArgumentException, URISyntaxException {
+        String usrlib = configuration.getString(YarnConfigOptions.PROVIDED_USRLIB_DIR);
+        if (usrlib == null) return null;
+        final List<String> providedDirs =
+                Collections.singletonList(usrlib);
+        final List<Path> paths =
+                getQualifiedRemoteSharedPaths(
+                        providedDirs,
+                        YarnConfigOptions.PROVIDED_USRLIB_DIR.key(),
+                        yarnConfiguration);
+        if (paths == null || paths.size() == 0) {
             return null;
         }
-        final Path providedUsrLibPath = strToPathMapper(pathStr, yarnConfiguration);
+
+        final Path providedUsrLibPath = paths.get(0);
         checkArgument(
                 isUsrLibIncludedInPath(
                                 providedUsrLibPath.getFileSystem(yarnConfiguration),
                                 providedUsrLibPath)
                         && isRemotePath(providedUsrLibPath.toString()),
-                "The %s must point to a dir named with %s "
-                        + "\" and the dir should be accessible from all worker nodes, while the %s is local.",
+                "The %s must point to a remote dir named with %s.",
                 YarnConfigOptions.PROVIDED_USRLIB_DIR.key(),
-                ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR,
-                providedUsrLibPath);
+                ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR);
         return providedUsrLibPath;
     }
 
@@ -686,26 +706,18 @@ public final class Utils {
                 && ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR.equals(fileStatus.getPath().getName());
     }
 
-    private static List<Path> getRemoteSharedPaths(
-            org.apache.flink.configuration.Configuration configuration,
-            FunctionWithException<String, Path, IOException> strToPathMapper)
-            throws IOException {
+    private static List<Path> validateRemoteSharedPaths(
+            List<Path> providedDirs, String configOptionKey) throws IOException {
 
-        final List<Path> providedLibDirs =
-                ConfigUtils.decodeListFromConfig(
-                        configuration, YarnConfigOptions.PROVIDED_LIB_DIRS, strToPathMapper);
-
-        for (Path path : providedLibDirs) {
+        for (Path path : providedDirs) {
             checkArgument(
                     Utils.isRemotePath(path.toString()),
                     "The \""
-                            + YarnConfigOptions.PROVIDED_LIB_DIRS.key()
+                            + configOptionKey
                             + "\" should only contain"
-                            + " dirs accessible from all worker nodes, while the \""
-                            + path
-                            + "\" is local.");
+                            + " dirs accessible from all worker nodes.");
         }
-        return providedLibDirs;
+        return providedDirs;
     }
 
     public static YarnConfiguration getYarnAndHadoopConfiguration(

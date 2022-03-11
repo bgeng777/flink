@@ -18,13 +18,14 @@
 
 package org.apache.flink.yarn;
 
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.testutils.FlinkMatchers;
-import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.TestLogger;
 import org.apache.flink.yarn.configuration.YarnConfigOptions;
 
 import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
+import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.junit.Rule;
@@ -38,6 +39,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Stream;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
@@ -101,14 +103,14 @@ public class UtilsTest extends TestLogger {
         final String defaultFs = "hdfs://localhost:9000";
         final String qualifiedPath = defaultFs + sharedLibPath;
 
-        final Configuration flinkConfig = new Configuration();
-        flinkConfig.set(
-                YarnConfigOptions.PROVIDED_LIB_DIRS, Collections.singletonList(nonQualifiedPath));
         final YarnConfiguration yarnConfig = new YarnConfiguration();
         yarnConfig.set(CommonConfigurationKeysPublic.FS_DEFAULT_NAME_KEY, defaultFs);
 
         final List<org.apache.hadoop.fs.Path> sharedLibs =
-                Utils.getQualifiedRemoteSharedPaths(flinkConfig, yarnConfig);
+                Utils.getQualifiedRemoteSharedPaths(
+                        Collections.singletonList(nonQualifiedPath),
+                        YarnConfigOptions.PROVIDED_LIB_DIRS.key(),
+                        yarnConfig);
         assertThat(sharedLibs.size(), is(1));
         assertThat(sharedLibs.get(0).toUri().toString(), is(qualifiedPath));
     }
@@ -120,15 +122,42 @@ public class UtilsTest extends TestLogger {
         flinkConfig.set(YarnConfigOptions.PROVIDED_LIB_DIRS, Collections.singletonList(localLib));
 
         try {
-            Utils.getQualifiedRemoteSharedPaths(flinkConfig, new YarnConfiguration());
+            Utils.getQualifiedRemoteProvidedLibDirs(flinkConfig, new YarnConfiguration());
             fail("We should throw an exception when the shared lib is set to local path.");
-        } catch (FlinkException ex) {
+        } catch (Exception ex) {
             final String msg =
                     "The \""
                             + YarnConfigOptions.PROVIDED_LIB_DIRS.key()
                             + "\" should only "
                             + "contain dirs accessible from all worker nodes";
             assertThat(ex, FlinkMatchers.containsMessage(msg));
+        }
+    }
+
+    @Test
+    public void testInvalidRemoteUsrLib() throws IOException {
+        final String sharedLibPath = "hdfs:///flink/badlib";
+
+        org.apache.hadoop.conf.Configuration hdConf = new org.apache.hadoop.conf.Configuration();
+        hdConf.set(
+                MiniDFSCluster.HDFS_MINIDFS_BASEDIR, temporaryFolder.getRoot().getAbsolutePath());
+        try (MiniDFSCluster hdfsCluster = new MiniDFSCluster.Builder(hdConf).build()) {
+            org.apache.hadoop.fs.Path hdfsRootPath =
+                    new org.apache.hadoop.fs.Path(hdfsCluster.getURI());
+            hdfsCluster.getFileSystem().mkdirs(new org.apache.hadoop.fs.Path(sharedLibPath));
+
+            final Configuration flinkConfig = new Configuration();
+            flinkConfig.set(YarnConfigOptions.PROVIDED_USRLIB_DIR, sharedLibPath);
+            final YarnConfiguration yarnConfig = new YarnConfiguration();
+            yarnConfig.set(
+                    CommonConfigurationKeysPublic.FS_DEFAULT_NAME_KEY, hdfsRootPath.toString());
+            assertThatThrownBy(
+                            () -> Utils.getQualifiedRemoteProvidedUsrLib(flinkConfig, yarnConfig))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(
+                            "The %s must point to a remote dir named with %s.",
+                            YarnConfigOptions.PROVIDED_USRLIB_DIR.key(),
+                            ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR);
         }
     }
 

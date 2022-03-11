@@ -514,7 +514,10 @@ class YarnApplicationFileUploader implements AutoCloseable {
     private boolean isUsrLibDirIncludedInProvidedLibDirs(final List<Path> providedLibDirs)
             throws IOException {
         for (Path path : providedLibDirs) {
-            if (Utils.isUsrLibIncludedInPath(fileSystem, path)) {
+            final FileStatus fileStatus = fileSystem.getFileStatus(path);
+            if (fileStatus.isDirectory()
+                    && ConfigConstants.DEFAULT_FLINK_USR_LIB_DIR.equals(
+                            fileStatus.getPath().getName())) {
                 return true;
             }
         }

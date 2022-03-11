@@ -796,10 +796,10 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
         ApplicationSubmissionContext appContext = yarnApplication.getApplicationSubmissionContext();
 
         final List<Path> providedLibDirs =
-                Utils.getQualifiedRemoteSharedPaths(configuration, yarnConfiguration);
+                Utils.getQualifiedRemoteProvidedLibDirs(configuration, yarnConfiguration);
 
         final Path providedUsrLibDir =
-                Utils.getQualifiedRemoteUsrLib(configuration, yarnConfiguration);
+                Utils.getQualifiedRemoteProvidedUsrLib(configuration, yarnConfiguration);
 
         Path stagingDirPath = getStagingDir(fs);
         FileSystem stagingDirFs = stagingDirPath.getFileSystem(yarnConfiguration);

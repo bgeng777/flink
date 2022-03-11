@@ -89,6 +89,21 @@ public class YARNApplicationITCase extends YarnTestBase {
                                         remoteJar, YarnConfigOptions.UserJarInclusion.DISABLED)));
     }
 
+    @Test
+    public void testApplicationClusterWithRemoteUsrLib() throws Exception {
+        final Path testingJar = getTestingJar();
+        final Path remoteJar =
+                new Path(miniDFSCluster.getFileSystem().getHomeDirectory(), testingJar.getName());
+        final String remoteUsrLib = "hdfs:///flink/usrlib";
+        miniDFSCluster.getFileSystem().mkdirs(new Path(remoteUsrLib));
+        miniDFSCluster.getFileSystem().copyFromLocalFile(testingJar, remoteJar);
+        runTest(
+                () ->
+                        deployApplication(
+                                createDefaultConfiguration(
+                                        remoteJar, YarnConfigOptions.UserJarInclusion.DISABLED).set(YarnConfigOptions.PROVIDED_USRLIB_DIR, remoteUsrLib)));
+    }
+
     private void deployApplication(Configuration configuration) throws Exception {
         try (final YarnClusterDescriptor yarnClusterDescriptor =
                 createYarnClusterDescriptor(configuration)) {
