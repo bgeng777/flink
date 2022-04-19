@@ -893,7 +893,7 @@ public abstract class YarnTestBase extends TestLogger {
         errContent = new ByteArrayOutputStream();
         PipedOutputStream out = new PipedOutputStream();
         PipedInputStream in = new PipedInputStream(out);
-        PrintStream stdinPrintStream = new PrintStream(out);
+        PrintStream stdinPrintStream = new PrintStream(out, true);
 
         System.setOut(new PrintStream(outContent));
         System.setErr(new PrintStream(errContent));

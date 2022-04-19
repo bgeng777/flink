@@ -350,6 +350,7 @@ public class YARNSessionCapacitySchedulerITCase extends YarnTestBase {
                         // FLINK-1902: check if jobmanager hostname is shown in web interface
                         //
                         assertThat(flinkConfig, hasEntry(JobManagerOptions.ADDRESS.key(), host));
+                        LOG.info("Extracted hostname:port: {}:{} {}", host, port, flinkConfig);
                     } finally {
                         yarnSessionClusterRunner.sendStop();
                         yarnSessionClusterRunner.join();
