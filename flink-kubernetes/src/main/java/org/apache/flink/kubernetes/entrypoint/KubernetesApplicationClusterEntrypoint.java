@@ -110,12 +110,21 @@ public final class KubernetesApplicationClusterEntrypoint extends ApplicationClu
 
         // No need to do pipelineJars validation if it is a PyFlink job.
         if (!(PackagedProgramUtils.isPython(jobClassName)
-                || PackagedProgramUtils.isPython(programArguments))) {
+                || PackagedProgramUtils.isPython(programArguments)
+                || PackagedProgramUtils.isSql(jobClassName))) {
             final List<File> pipelineJars =
                     KubernetesUtils.checkJarFileForApplicationMode(configuration);
             Preconditions.checkArgument(pipelineJars.size() == 1, "Should only have one jar");
             return DefaultPackagedProgramRetriever.create(
                     userLibDir, pipelineJars.get(0), jobClassName, programArguments, configuration);
+        }
+
+        if (PackagedProgramUtils.isSql(jobClassName)) {
+            String tmpSqlFile =
+                    PackagedProgramUtils.getSqlFileInCluster(jobClassName, programArguments);
+            String[] sqlArgs = new String[] {"-f", tmpSqlFile};
+            return DefaultPackagedProgramRetriever.create(
+                    userLibDir, jobClassName, sqlArgs, configuration);
         }
 
         return DefaultPackagedProgramRetriever.create(

@@ -169,6 +169,7 @@ public class CliOptionsParser {
         options.addOption(PYARCHIVE_OPTION);
         options.addOption(PYEXEC_OPTION);
         options.addOption(PYCLIENTEXEC_OPTION);
+        options.addOption(OPTION_APPLICATION_MODE);
         return options;
     }
 
@@ -271,6 +272,7 @@ public class CliOptionsParser {
         try {
             DefaultParser parser = new DefaultParser();
             CommandLine line = parser.parse(EMBEDDED_MODE_CLIENT_OPTIONS, args, true);
+            System.out.println(line.hasOption(CliOptionsParser.OPTION_APPLICATION_MODE.getOpt()));
             return new CliOptions(
                     line.hasOption(CliOptionsParser.OPTION_HELP.getOpt()),
                     checkSessionId(line),

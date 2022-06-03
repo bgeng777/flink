@@ -20,15 +20,16 @@ package org.apache.flink.table.client.cli;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.client.cli.ApplicationDeployer;
-import org.apache.flink.client.cli.CliFrontend;
 import org.apache.flink.client.deployment.ClusterClientServiceLoader;
 import org.apache.flink.client.deployment.DefaultClusterClientServiceLoader;
 import org.apache.flink.client.deployment.application.ApplicationConfiguration;
 import org.apache.flink.client.deployment.application.cli.ApplicationClusterDeployer;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.DeploymentOptionsInternal;
 import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.internal.TableResultInternal;
+import org.apache.flink.table.client.SqlClient;
 import org.apache.flink.table.client.SqlClientException;
 import org.apache.flink.table.client.config.ResultMode;
 import org.apache.flink.table.client.config.SqlClientOptions;
@@ -87,6 +88,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -252,16 +254,21 @@ public class CliClient implements AutoCloseable {
 
     public void executeInNonInteractiveApplicationMode(String content) {
         try {
-            final ClusterClientServiceLoader clientServiceLoader =  new DefaultClusterClientServiceLoader();
+            final ClusterClientServiceLoader clientServiceLoader =
+                    new DefaultClusterClientServiceLoader();
             final ApplicationDeployer deployer =
                     new ApplicationClusterDeployer(clientServiceLoader);
+            String[] sqlStatements =
+                    Arrays.stream(content.trim().replaceAll("\\R", " ").split(";"))
+                            .map(String::trim)
+                            .toArray(String[]::new);
             final ApplicationConfiguration applicationConfiguration =
-                    new ApplicationConfiguration(
-                            new String[]{"sql-application", content}, null);
+                    new ApplicationConfiguration(sqlStatements, SqlClient.class.getName());
 
             final String configurationDirectory = getConfigurationDirectoryFromEnv();
             final Configuration configuration =
                     GlobalConfiguration.loadConfiguration(configurationDirectory);
+            configuration.set(DeploymentOptionsInternal.CONF_DIR, configurationDirectory);
             deployer.run(configuration, applicationConfiguration);
         } catch (Exception e) {
             e.printStackTrace();
@@ -373,7 +380,8 @@ public class CliClient implements AutoCloseable {
      */
     private boolean executeFile(String content, OutputStream outputStream, ExecutionMode mode) {
         if (mode.equals(ExecutionMode.NON_INTERACTIVE_EXECUTION)) {
-            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EXECUTE_FILE).toAnsi());
+            terminal.writer()
+                    .println(CliStrings.messageInfo(CliStrings.MESSAGE_EXECUTE_FILE).toAnsi());
 
             // append line delimiter
             InputStream inputStream =
@@ -398,8 +406,6 @@ public class CliClient implements AutoCloseable {
             return true;
         }
     }
-
-
 
     private boolean executeOperation(Operation operation, ExecutionMode executionMode) {
         try {
@@ -433,7 +439,8 @@ public class CliClient implements AutoCloseable {
                 throw new SqlExecutionException(
                         "Unsupported operation in sql init file: " + operation.asSummaryString());
             }
-        } else if (executionMode.equals(ExecutionMode.NON_INTERACTIVE_EXECUTION)) {
+        } else if (executionMode.equals(ExecutionMode.NON_INTERACTIVE_EXECUTION)
+                || executionMode.equals(ExecutionMode.NON_INTERACTIVE_APPLICATION)) {
             ResultMode mode = executor.getSessionConfig(sessionId).get(EXECUTION_RESULT_MODE);
             if (operation instanceof QueryOperation && !mode.equals(TABLEAU)) {
                 throw new SqlExecutionException(

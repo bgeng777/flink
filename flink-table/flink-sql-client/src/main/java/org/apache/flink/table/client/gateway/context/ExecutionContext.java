@@ -19,6 +19,7 @@
 package org.apache.flink.table.client.gateway.context;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.DeploymentOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableConfig;
@@ -105,8 +106,16 @@ public class ExecutionContext {
         // instead we just use StreamExecutionEnvironment#executeAsync(StreamGraph) method
         // to execute existing StreamGraph.
         // This requires StreamExecutionEnvironment to have a full flink configuration.
+        boolean isK8sApplicationMode =
+                flinkConfig.get(DeploymentOptions.TARGET).equals("kubernetes-application");
+        // If we are in application mode, which implies this part of codes is executed in jm,
+        // we should reuse the StreamExecutionEnvironment built by ApplicationEntryPoint to use
+        // EmbeddedExecutor to execute the job
         StreamExecutionEnvironment streamExecEnv =
-                new StreamExecutionEnvironment(new Configuration(flinkConfig), classLoader);
+                isK8sApplicationMode
+                        ? StreamExecutionEnvironment.getExecutionEnvironment()
+                        : new StreamExecutionEnvironment(
+                                new Configuration(flinkConfig), classLoader);
 
         final Executor executor = lookupExecutor(streamExecEnv);
         return createStreamTableEnvironment(

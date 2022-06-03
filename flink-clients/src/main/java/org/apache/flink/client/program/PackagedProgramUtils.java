@@ -25,6 +25,7 @@ import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.optimizer.CompilerException;
 import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.util.FlinkException;
 
 import org.apache.commons.collections.CollectionUtils;
 
@@ -32,6 +33,7 @@ import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.MalformedURLException;
@@ -59,6 +61,8 @@ public enum PackagedProgramUtils {
 
     private static final String PYTHON_DRIVER_CLASS_NAME =
             "org.apache.flink.client.python.PythonDriver";
+
+    private static final String SQL_CLIENT_CLASS_NAME = "org.apache.flink.table.client.SqlClient";
 
     /**
      * Creates a {@link JobGraph} with a specified {@link JobID} from the given {@link
@@ -195,6 +199,10 @@ public enum PackagedProgramUtils {
                         || entryPointClassName.equals(PYTHON_GATEWAY_CLASS_NAME));
     }
 
+    public static Boolean isSql(String entryPointClassName) {
+        return (entryPointClassName != null) && (entryPointClassName.equals(SQL_CLIENT_CLASS_NAME));
+    }
+
     public static boolean isPython(String[] programArguments) {
         return CollectionUtils.containsAny(
                 Arrays.asList(programArguments),
@@ -268,5 +276,27 @@ public enum PackagedProgramUtils {
                         stdout.length() == 0 ? "(none)" : stdout,
                         stderr.length() == 0 ? "(none)" : stderr),
                 cause);
+    }
+
+    public static String getSqlFileInCluster(String jobClassName, String[] programArguments)
+            throws FlinkException {
+
+        String dir = System.getProperty("user.dir");
+        if (programArguments.length >= 1) {
+            try {
+                // TODO: generate normal temporary file later
+                FileWriter writer = new FileWriter(dir + "/tmp.sql");
+                for (String str : programArguments) {
+                    writer.write(str + ";" + System.lineSeparator());
+                }
+                writer.flush();
+                writer.close();
+            } catch (IOException e) {
+                throw new FlinkException(
+                        "Failed to generate tmp sql file in k8s job manager pod due to: "
+                                + e.getMessage());
+            }
+        }
+        return dir + "/tmp.sql";
     }
 }

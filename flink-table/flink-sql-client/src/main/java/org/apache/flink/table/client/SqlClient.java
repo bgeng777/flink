@@ -150,7 +150,7 @@ public class SqlClient {
 
             if (!hasSqlFile && !hasUpdateStatement) {
                 cli.executeInInteractiveMode();
-            } else if (isApplicationMode){
+            } else if (isApplicationMode) {
                 cli.executeInNonInteractiveApplicationMode(readExecutionContent());
             } else {
                 cli.executeInNonInteractiveMode(readExecutionContent());
@@ -182,6 +182,7 @@ public class SqlClient {
         switch (mode) {
             case MODE_EMBEDDED:
                 final CliOptions options = CliOptionsParser.parseEmbeddedModeClient(modeArgs);
+                LOG.error(String.valueOf(options.isApplicationMode()));
                 if (options.isPrintHelp()) {
                     CliOptionsParser.printHelpEmbeddedModeClient();
                 } else {
