@@ -53,6 +53,13 @@ public class CliOptionsParser {
                     .desc("Show the help message with descriptions of all options.")
                     .build();
 
+    public static final Option OPTION_APPLICATION_MODE =
+            Option.builder("app")
+                    .required(false)
+                    .longOpt("application")
+                    .desc("Use application mode to deploy flink jobs.")
+                    .build();
+
     public static final Option OPTION_SESSION =
             Option.builder("s")
                     .required(false)
@@ -273,7 +280,8 @@ public class CliOptionsParser {
                     checkUrls(line, CliOptionsParser.OPTION_LIBRARY),
                     line.getOptionValue(CliOptionsParser.OPTION_UPDATE.getOpt()),
                     line.getOptionValue(CliOptionsParser.OPTION_HISTORY.getOpt()),
-                    getPythonConfiguration(line));
+                    getPythonConfiguration(line),
+                    line.hasOption(CliOptionsParser.OPTION_APPLICATION_MODE.getOpt()));
         } catch (ParseException e) {
             throw new SqlClientException(e.getMessage());
         }
@@ -292,7 +300,8 @@ public class CliOptionsParser {
                     checkUrls(line, CliOptionsParser.OPTION_LIBRARY),
                     line.getOptionValue(CliOptionsParser.OPTION_UPDATE.getOpt()),
                     line.getOptionValue(CliOptionsParser.OPTION_HISTORY.getOpt()),
-                    getPythonConfiguration(line));
+                    getPythonConfiguration(line),
+                    false);
         } catch (ParseException e) {
             throw new SqlClientException(e.getMessage());
         }
@@ -311,7 +320,8 @@ public class CliOptionsParser {
                     checkUrls(line, CliOptionsParser.OPTION_LIBRARY),
                     null,
                     null,
-                    getPythonConfiguration(line));
+                    getPythonConfiguration(line),
+                    false);
         } catch (ParseException e) {
             throw new SqlClientException(e.getMessage());
         }

@@ -40,6 +40,7 @@ public class CliOptions {
     private final String updateStatement;
     private final String historyFilePath;
     private final Configuration pythonConfiguration;
+    private final boolean isApplicationMode;
 
     public CliOptions(
             boolean isPrintHelp,
@@ -50,7 +51,8 @@ public class CliOptions {
             List<URL> libraryDirs,
             String updateStatement,
             String historyFilePath,
-            Configuration pythonConfiguration) {
+            Configuration pythonConfiguration,
+            boolean isApplicationMode) {
         this.isPrintHelp = isPrintHelp;
         this.sessionId = sessionId;
         this.initFile = initFile;
@@ -60,10 +62,15 @@ public class CliOptions {
         this.updateStatement = updateStatement;
         this.historyFilePath = historyFilePath;
         this.pythonConfiguration = pythonConfiguration;
+        this.isApplicationMode = isApplicationMode;
     }
 
     public boolean isPrintHelp() {
         return isPrintHelp;
+    }
+
+    public boolean isApplicationMode() {
+        return isApplicationMode;
     }
 
     public String getSessionId() {

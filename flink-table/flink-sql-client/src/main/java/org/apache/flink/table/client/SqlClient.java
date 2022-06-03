@@ -120,6 +120,7 @@ public class SqlClient {
 
         boolean hasSqlFile = options.getSqlFile() != null;
         boolean hasUpdateStatement = options.getUpdateStatement() != null;
+        boolean isApplicationMode = options.isApplicationMode();
         if (hasSqlFile && hasUpdateStatement) {
             throw new IllegalArgumentException(
                     String.format(
@@ -149,6 +150,8 @@ public class SqlClient {
 
             if (!hasSqlFile && !hasUpdateStatement) {
                 cli.executeInInteractiveMode();
+            } else if (isApplicationMode){
+                cli.executeInNonInteractiveApplicationMode(readExecutionContent());
             } else {
                 cli.executeInNonInteractiveMode(readExecutionContent());
             }

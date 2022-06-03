@@ -19,6 +19,14 @@
 package org.apache.flink.table.client.cli;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.client.cli.ApplicationDeployer;
+import org.apache.flink.client.cli.CliFrontend;
+import org.apache.flink.client.deployment.ClusterClientServiceLoader;
+import org.apache.flink.client.deployment.DefaultClusterClientServiceLoader;
+import org.apache.flink.client.deployment.application.ApplicationConfiguration;
+import org.apache.flink.client.deployment.application.cli.ApplicationClusterDeployer;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.internal.TableResultInternal;
 import org.apache.flink.table.client.SqlClientException;
@@ -86,6 +94,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import static org.apache.flink.client.cli.CliFrontend.getConfigurationDirectoryFromEnv;
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
 import static org.apache.flink.table.api.internal.TableResultImpl.TABLE_RESULT_OK;
 import static org.apache.flink.table.client.cli.CliStrings.MESSAGE_EXECUTE_STATEMENT;
@@ -241,6 +250,24 @@ public class CliClient implements AutoCloseable {
         }
     }
 
+    public void executeInNonInteractiveApplicationMode(String content) {
+        try {
+            final ClusterClientServiceLoader clientServiceLoader =  new DefaultClusterClientServiceLoader();
+            final ApplicationDeployer deployer =
+                    new ApplicationClusterDeployer(clientServiceLoader);
+            final ApplicationConfiguration applicationConfiguration =
+                    new ApplicationConfiguration(
+                            new String[]{"sql-application", content}, null);
+
+            final String configurationDirectory = getConfigurationDirectoryFromEnv();
+            final Configuration configuration =
+                    GlobalConfiguration.loadConfiguration(configurationDirectory);
+            deployer.run(configuration, applicationConfiguration);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     public boolean executeInitialization(String content) {
         try {
             OutputStream outputStream = new ByteArrayOutputStream(256);
@@ -259,6 +286,8 @@ public class CliClient implements AutoCloseable {
         INTERACTIVE_EXECUTION,
 
         NON_INTERACTIVE_EXECUTION,
+
+        NON_INTERACTIVE_APPLICATION,
 
         INITIALIZATION
     }
@@ -343,26 +372,34 @@ public class CliClient implements AutoCloseable {
      * @param content SQL file content
      */
     private boolean executeFile(String content, OutputStream outputStream, ExecutionMode mode) {
-        terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EXECUTE_FILE).toAnsi());
+        if (mode.equals(ExecutionMode.NON_INTERACTIVE_EXECUTION)) {
+            terminal.writer().println(CliStrings.messageInfo(CliStrings.MESSAGE_EXECUTE_FILE).toAnsi());
 
-        // append line delimiter
-        InputStream inputStream =
-                new ByteArrayInputStream(SqlMultiLineParser.formatSqlFile(content).getBytes());
-        Terminal dumbTerminal = TerminalUtils.createDumbTerminal(inputStream, outputStream);
-        try {
-            LineReader lineReader = createLineReader(dumbTerminal);
-            return getAndExecuteStatements(lineReader, mode);
-        } catch (Throwable e) {
-            printExecutionException(e);
-            return false;
-        } finally {
+            // append line delimiter
+            InputStream inputStream =
+                    new ByteArrayInputStream(SqlMultiLineParser.formatSqlFile(content).getBytes());
+            Terminal dumbTerminal = TerminalUtils.createDumbTerminal(inputStream, outputStream);
             try {
-                dumbTerminal.close();
-            } catch (IOException e) {
-                // ignore
+                LineReader lineReader = createLineReader(dumbTerminal);
+                return getAndExecuteStatements(lineReader, mode);
+            } catch (Throwable e) {
+                printExecutionException(e);
+                return false;
+            } finally {
+                try {
+                    dumbTerminal.close();
+                } catch (IOException e) {
+                    // ignore
+                }
             }
+        } else {
+            // deploy application and upload sql file
+
+            return true;
         }
     }
+
+
 
     private boolean executeOperation(Operation operation, ExecutionMode executionMode) {
         try {
