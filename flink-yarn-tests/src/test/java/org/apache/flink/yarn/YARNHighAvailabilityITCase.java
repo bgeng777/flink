@@ -124,6 +124,7 @@ class YARNHighAvailabilityITCase extends YarnTestBase {
 
     @AfterAll
     static void teardown() throws Exception {
+        YarnTestBase.teardown();
         if (zkServer != null) {
             zkServer.stop();
             zkServer = null;
