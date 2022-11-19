@@ -20,7 +20,7 @@ import uuid
 from enum import Enum
 from typing import Callable, Union, List, cast, Optional, overload
 
-from pyflink.util.java_utils import get_j_env_configuration
+from pyflink.util.java_utils import get_j_env_configuration, get_j_env_exec_configuration
 
 from pyflink.common import typeinfo, ExecutionConfig, Row
 from pyflink.common.typeinfo import RowTypeInfo, Types, TypeInformation, _from_java_type
@@ -2823,6 +2823,20 @@ def _get_one_input_stream_operator(data_stream: DataStream,
             j_output_type_info,
             j_namespace_serializer)
         return j_python_function_operator, j_output_type_info
+    elif func_type == UserDefinedDataStreamFunction.CEP:
+        if python_execution_mode == 'thread':
+            JDataStreamPythonFunctionOperator = gateway.jvm.EmbeddedPythonCepOperator
+            j_exec_conf = get_j_env_exec_configuration(data_stream._j_data_stream.getExecutionEnvironment())
+            j_python_function_operator = JDataStreamPythonFunctionOperator(
+                j_conf,
+                j_exec_conf,
+                j_data_stream_python_function_info,
+                j_input_types,
+                j_output_type_info)
+
+            return j_python_function_operator, j_output_type_info
+        else:
+            raise TypeError("Unsupported function type: %s in Non Thread Mode" % func_type)
     else:
         raise TypeError("Unsupported function type: %s" % func_type)
 

@@ -88,6 +88,13 @@ def get_j_env_configuration(j_env):
     field.setAccessible(True)
     return field.get(j_env)
 
+def get_j_env_exec_configuration(j_env):
+    env_clazz = load_java_class(
+        "org.apache.flink.streaming.api.environment.StreamExecutionEnvironment")
+    field = env_clazz.getDeclaredField("config")
+    field.setAccessible(True)
+    return field.get(j_env)
+
 
 def get_field_value(java_obj, field_name):
     field = get_field(java_obj.getClass(), field_name)

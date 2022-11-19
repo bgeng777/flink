@@ -358,6 +358,7 @@ message UserDefinedDataStreamFunction {
     WINDOW = 4;
     CO_BROADCAST_PROCESS = 5;
     KEYED_CO_BROADCAST_PROCESS = 6;
+    CEP = 7;
     REVISE_OUTPUT = 100;
   }
 

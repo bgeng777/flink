@@ -50,7 +50,7 @@ public abstract class AbstractOneInputEmbeddedPythonFunctionOperator<IN, OUT>
     /** The TypeInformation of the input data. */
     private final TypeInformation<IN> inputTypeInfo;
 
-    private transient PythonTypeUtils.DataConverter<IN, Object> inputDataConverter;
+    protected transient PythonTypeUtils.DataConverter<IN, Object> inputDataConverter;
 
     protected transient long timestamp;
 

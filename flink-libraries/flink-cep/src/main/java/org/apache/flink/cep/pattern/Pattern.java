@@ -90,6 +90,10 @@ public class Pattern<T, F extends T> {
         this.afterMatchSkipStrategy = afterMatchSkipStrategy;
     }
 
+    public Pattern(final String name) {
+        this(name, null, ConsumingStrategy.STRICT, AfterMatchSkipStrategy.noSkip());
+    }
+
     public Pattern<T, ? extends T> getPrevious() {
         return previous;
     }
