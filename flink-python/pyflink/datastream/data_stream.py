@@ -1335,6 +1335,31 @@ class KeyedStream(DataStream):
         return self.process(FilterKeyedProcessFunctionAdapter(func), self._original_data_type_info)\
             .name("Filter")
 
+    def cep_process(self, func: ProcessFunction, output_type: TypeInformation = None) -> 'DataStream':
+        """
+        Applies the given ProcessFunction on the input stream, thereby creating a transformed output
+        stream.
+
+        The function will be called for every element in the input streams and can produce zero or
+        more output elements.
+
+        :param func: The ProcessFunction that is called for each element in the stream.
+        :param output_type: TypeInformation for the result type of the function.
+        :return: The transformed DataStream.
+        """
+
+        from pyflink.fn_execution import flink_fn_execution_pb2
+        j_python_data_stream_function_operator, j_output_type_info = \
+            _get_one_input_stream_operator(
+                self,
+                func,
+                flink_fn_execution_pb2.UserDefinedDataStreamFunction.CEP,  # type: ignore
+                output_type)
+        return DataStream(self._j_data_stream.transform(
+            "CEP",
+            j_output_type_info,
+            j_python_data_stream_function_operator))
+
     class AccumulateType(Enum):
         MIN = 1
         MAX = 2

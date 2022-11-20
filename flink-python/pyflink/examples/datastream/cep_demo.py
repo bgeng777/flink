@@ -25,7 +25,7 @@ import argparse
 import logging
 import sys
 
-from pyflink.common import WatermarkStrategy, Encoder, Types, Configuration
+from pyflink.common import WatermarkStrategy, Encoder, Types, Configuration, Row
 from pyflink.datastream import StreamExecutionEnvironment, RuntimeExecutionMode
 from pyflink.datastream.cep import cep
 from pyflink.datastream.cep.condition import Condition
@@ -34,9 +34,9 @@ from pyflink.datastream.connectors.file_system import (FileSource, StreamFormat,
                                                        OutputFileConfig, RollingPolicy)
 
 cep_demo_data = [
-    "1,1,1",
-    "2,1,1",
-    "3,1,1"
+    Row(f0="1", f1=1),
+    Row(f0="1", f1=2),
+    Row(f0="1", f1=3)
 ]
 
 
@@ -60,7 +60,7 @@ def cep_demo(input_path, output_path):
 
     # define the sourc        ds = env.from_source(
 
-    ds = env.from_collection(cep_demo_data)
+    ds = env.from_collection(collection=cep_demo_data, type_info=Types.ROW([Types.STRING()]))
 
     def split(line):
         yield from line.split()
@@ -74,7 +74,7 @@ def cep_demo(input_path, output_path):
     # output = ds.filter(
     #     filter_func
     # ).print()
-    output = cep.pattern(ds, pattern)
+    output = cep.pattern(ds, pattern).print()
     # compute word count
     # ds = ds.flat_map(split) \
     #        .map(lambda i: (i, 1), output_type=Types.TUPLE([Types.STRING(), Types.INT()])) \

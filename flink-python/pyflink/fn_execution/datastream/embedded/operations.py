@@ -148,6 +148,27 @@ def extract_process_function(
             yield from process_func(on_timer(timestamp, timer_context))
 
         return OneInputOperation(open_func, close_func, process_element_func, on_timer_func)
+    elif func_type == UserDefinedDataStreamFunction.CEP:
+        function_context = InternalKeyedProcessFunctionContext(
+            j_function_context, user_defined_function_proto.key_type_info)
+        timer_context = InternalKeyedProcessFunctionOnTimerContext(
+            j_timer_context, user_defined_function_proto.key_type_info)
+
+        keyed_state_backend = KeyedStateBackend(
+            function_context,
+            j_keyed_state_backend)
+        runtime_context.set_keyed_state_backend(keyed_state_backend)
+
+        process_element = user_defined_func.process_element
+        on_timer = user_defined_func.on_timer
+
+        def process_element_func(value):
+            yield from process_func(process_element(value[1], function_context))
+
+        def on_timer_func(timestamp):
+            yield from process_func(on_timer(timestamp, timer_context))
+
+        return OneInputOperation(open_func, close_func, process_element_func, on_timer_func)
 
     elif func_type == UserDefinedDataStreamFunction.CO_PROCESS:
         function_context = InternalProcessFunctionContext(j_function_context)

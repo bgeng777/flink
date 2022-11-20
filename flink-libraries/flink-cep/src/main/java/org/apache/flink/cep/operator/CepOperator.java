@@ -102,6 +102,10 @@ public class CepOperator<IN, KEY, OUT>
     private transient MapState<Long, List<IN>> elementQueueState;
     private transient SharedBuffer<IN> partialMatches;
 
+    public void setTimerService(InternalTimerService<VoidNamespace> timerService) {
+        this.timerService = timerService;
+    }
+
     private transient InternalTimerService<VoidNamespace> timerService;
 
     private transient NFA<IN> nfa;
@@ -203,9 +207,11 @@ public class CepOperator<IN, KEY, OUT>
     @Override
     public void open() throws Exception {
         super.open();
-        timerService =
-                getInternalTimerService(
-                        "watermark-callbacks", VoidNamespaceSerializer.INSTANCE, this);
+        if (timerService == null) {
+            timerService =
+                    getInternalTimerService(
+                            "watermark-callbacks", VoidNamespaceSerializer.INSTANCE, this);
+        }
 
         nfa = nfaFactory.createNFA();
         nfa.open(cepRuntimeContext, new Configuration());

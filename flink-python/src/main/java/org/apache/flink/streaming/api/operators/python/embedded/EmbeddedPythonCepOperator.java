@@ -34,17 +34,21 @@ import org.apache.flink.cep.pattern.conditions.SimpleCondition;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.fnexecution.v1.FlinkFnApi;
 import org.apache.flink.python.util.ProtoUtils;
+import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.VoidNamespace;
 import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.streaming.api.SimpleTimerService;
 import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.python.DataStreamPythonFunctionInfo;
+import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.InternalTimer;
 import org.apache.flink.streaming.api.operators.InternalTimerService;
+import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.operators.Triggerable;
 import org.apache.flink.streaming.api.utils.PythonTypeUtils;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.Collector;
 
@@ -80,7 +84,13 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
 
     private transient PythonTypeUtils.DataConverter<K, Object> keyConverter;
 
-    private transient CepOperator<IN, K, OUT> internalOperator;
+    private CepOperator<IN, K, OUT> internalOperator;
+
+    ExecutionConfig getCepExecutionConfig() {
+        return executionConfig;
+    }
+
+    private ExecutionConfig executionConfig;
 
     @Override
     protected <N, S extends State, T> S getOrCreateKeyedState(
@@ -96,6 +106,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
             TypeInformation<IN> inputTypeInfo,
             TypeInformation<OUT> outputTypeInfo) {
         super(config, pythonFunctionInfo, inputTypeInfo, outputTypeInfo);
+        this.executionConfig = executionConfig;
         final TypeSerializer<IN> inputSerializer = inputTypeInfo.createSerializer(executionConfig);
         final boolean isProcessingTime = true;
 
@@ -122,9 +133,9 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                             throws Exception {
                         StringBuilder sb = new StringBuilder();
                         for (IN i : match.get("start")) {
-                            sb.append((String) i);
+                            sb.append((String) ((Row) i).getField(0));
                         }
-                        out.collect((OUT) sb.toString());
+                        out.collect((OUT) Row.of(sb.toString()));
                     }
                 };
         internalOperator =
@@ -139,9 +150,25 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
     }
 
     @Override
-    public void open() throws Exception {
-        keyTypeInfo = ((RowTypeInfo) this.getInputTypeInfo()).getTypeAt(0);
+    public void setup(
+            StreamTask<?, ?> containingTask,
+            StreamConfig config,
+            Output<StreamRecord<OUT>> output) {
+        super.setup(containingTask, config, output);
+        internalOperator.setup(containingTask, config, output);
+    }
 
+    @Override
+    public void initializeState(StateInitializationContext context) throws Exception {
+        super.initializeState(context);
+        internalOperator.initializeState(context);
+    }
+
+    @Override
+    public void open() throws Exception {
+
+        keyTypeInfo = ((RowTypeInfo) this.getInputTypeInfo()).getTypeAt(0);
+        //        throw new RuntimeException(keyTypeInfo.toString());
         keyConverter = PythonTypeUtils.TypeInfoToDataConverter.typeInfoDataConverter(keyTypeInfo);
 
         InternalTimerService<VoidNamespace> internalTimerService =
@@ -154,7 +181,9 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
         onTimerContext = new OnTimerContextImpl(timerService);
 
         super.open();
+        internalOperator.setTimerService(internalTimerService);
         internalOperator.open();
+        internalOperator.setProcessingTimeService(this.getProcessingTimeService());
     }
 
     @Override
@@ -200,8 +229,12 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
     @Override
     public <T> AbstractEmbeddedDataStreamPythonFunctionOperator<T> copy(
             DataStreamPythonFunctionInfo pythonFunctionInfo, TypeInformation<T> outputTypeInfo) {
-        return new EmbeddedPythonKeyedProcessOperator<>(
-                config, pythonFunctionInfo, getInputTypeInfo(), outputTypeInfo);
+        return new EmbeddedPythonCepOperator<>(
+                config,
+                getCepExecutionConfig(),
+                pythonFunctionInfo,
+                getInputTypeInfo(),
+                outputTypeInfo);
     }
 
     private void invokeUserFunction(TimeDomain timeDomain, InternalTimer<K, VoidNamespace> timer)
