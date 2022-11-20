@@ -55,12 +55,7 @@ public class SimplePythonCondition<T> extends SimpleCondition<T> {
 
     @Override
     public boolean filter(T value) throws Exception {
-        PyIterator results =
-                (PyIterator)
-                        interpreter.invokeMethod(
-                                "operation",
-                                "process_element",
-                                inputDataConverter.toExternal(value));
+        PyIterator results = (PyIterator) interpreter.invokeMethod("operation", "dir");
         boolean result = false;
         //        System.out.println((Row) outputDataConverter.toInternal(results.next()));
         if (results.hasNext()) {

@@ -92,6 +92,14 @@ class OneInputFunctionOperation(FunctionOperation):
 
         yield from self._output_elements(results)
 
+    def my_process_element(self, value):
+        results = self._main_operation.my_process_element(
+            self._input_data_converter.to_internal(value))
+
+        results = self._process_elements(results)
+
+        yield from self._output_elements(results)
+
 
 class TwoInputFunctionOperation(FunctionOperation):
     def __init__(self,

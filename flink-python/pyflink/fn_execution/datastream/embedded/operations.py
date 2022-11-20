@@ -165,6 +165,9 @@ def extract_process_function(
         def process_element_func(value):
             yield from process_func(process_element(value[1], function_context))
 
+        def my_process_element_func(value):
+            yield from process_func(process_element(value[1], function_context))
+
         def on_timer_func(timestamp):
             yield from process_func(on_timer(timestamp, timer_context))
 
