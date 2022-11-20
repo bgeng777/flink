@@ -73,9 +73,11 @@ public class EmbeddedPythonEnvironmentManager extends AbstractPythonEnvironmentM
             String sourceRootDir = new File(flinkHome, "../../../../").getCanonicalPath();
             String flinkPython = sourceRootDir + "/flink-python";
             // add flink-python of source code to PYTHONPATH
-            env.put(
-                    "PYTHONPATH",
-                    flinkPython + File.pathSeparator + env.getOrDefault("PYTHONPATH", ""));
+            throw new RuntimeException(env.getOrDefault("PYTHONPATH", "ff"));
+            //            env.put(
+            //                    "PYTHONPATH",
+            //                    flinkPython + File.pathSeparator + env.getOrDefault("PYTHONPATH",
+            // ""));
         }
 
         PythonInterpreterConfig interpreterConfig =

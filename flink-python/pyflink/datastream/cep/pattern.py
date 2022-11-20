@@ -7,7 +7,7 @@ class Pattern(object):
     def __init__(self, name: str):
         self.name = name
         self.gateway = get_gateway()
-        JPattern = self.gateway.jvm.org.apache.flink.cep.pattern.Pattern.Pattern
+        JPattern = self.gateway.jvm.org.apache.flink.cep.pattern.Pattern
         self.j_pattern = JPattern(name)
 
     def where(self, condition: Condition):

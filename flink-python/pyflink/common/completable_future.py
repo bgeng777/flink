@@ -15,7 +15,9 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import sys
 
+# sys.path.append('/Users/bgeng/flink-1.16.0/py37-2/lib/python3.7/site-packages')
 from py4j.protocol import Py4JJavaError
 
 from pyflink.util.exceptions import convert_py4j_exception

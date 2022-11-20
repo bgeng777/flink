@@ -663,6 +663,31 @@ class DataStream(object):
             j_output_type_info,
             j_python_data_stream_function_operator))
 
+    def cep_process(self, func: ProcessFunction, output_type: TypeInformation = None) -> 'DataStream':
+        """
+        Applies the given ProcessFunction on the input stream, thereby creating a transformed output
+        stream.
+
+        The function will be called for every element in the input streams and can produce zero or
+        more output elements.
+
+        :param func: The ProcessFunction that is called for each element in the stream.
+        :param output_type: TypeInformation for the result type of the function.
+        :return: The transformed DataStream.
+        """
+
+        from pyflink.fn_execution import flink_fn_execution_pb2
+        j_python_data_stream_function_operator, j_output_type_info = \
+            _get_one_input_stream_operator(
+                self,
+                func,
+                flink_fn_execution_pb2.UserDefinedDataStreamFunction.CEP,  # type: ignore
+                output_type)
+        return DataStream(self._j_data_stream.transform(
+            "CEP",
+            j_output_type_info,
+            j_python_data_stream_function_operator))
+
     def assign_timestamps_and_watermarks(self, watermark_strategy: WatermarkStrategy) -> \
             'DataStream':
         """
@@ -2824,6 +2849,7 @@ def _get_one_input_stream_operator(data_stream: DataStream,
             j_namespace_serializer)
         return j_python_function_operator, j_output_type_info
     elif func_type == UserDefinedDataStreamFunction.CEP:
+        print("CEP")
         if python_execution_mode == 'thread':
             JDataStreamPythonFunctionOperator = gateway.jvm.EmbeddedPythonCepOperator
             j_exec_conf = get_j_env_exec_configuration(data_stream._j_data_stream.getExecutionEnvironment())
