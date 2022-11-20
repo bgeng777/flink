@@ -96,7 +96,11 @@ public class CepOperator<IN, KEY, OUT>
     private static final String NFA_STATE_NAME = "nfaStateName";
     private static final String EVENT_QUEUE_STATE_NAME = "eventQueuesStateName";
 
-    private final NFACompiler.NFAFactory<IN> nfaFactory;
+    public void setNfaFactory(NFACompiler.NFAFactory<IN> nfaFactory) {
+        this.nfaFactory = nfaFactory;
+    }
+
+    private NFACompiler.NFAFactory<IN> nfaFactory;
 
     private transient ValueState<NFAState> computationStates;
     private transient MapState<Long, List<IN>> elementQueueState;
@@ -143,7 +147,7 @@ public class CepOperator<IN, KEY, OUT>
     public CepOperator(
             final TypeSerializer<IN> inputSerializer,
             final boolean isProcessingTime,
-            final NFACompiler.NFAFactory<IN> nfaFactory,
+            @Nullable final NFACompiler.NFAFactory<IN> nfaFactory,
             @Nullable final EventComparator<IN> comparator,
             @Nullable final AfterMatchSkipStrategy afterMatchSkipStrategy,
             final PatternProcessFunction<IN, OUT> function,
@@ -151,7 +155,7 @@ public class CepOperator<IN, KEY, OUT>
         super(function);
 
         this.inputSerializer = Preconditions.checkNotNull(inputSerializer);
-        this.nfaFactory = Preconditions.checkNotNull(nfaFactory);
+        this.nfaFactory = nfaFactory;
 
         this.isProcessingTime = isProcessingTime;
         this.comparator = comparator;
@@ -212,7 +216,9 @@ public class CepOperator<IN, KEY, OUT>
                     getInternalTimerService(
                             "watermark-callbacks", VoidNamespaceSerializer.INSTANCE, this);
         }
-
+        if (nfaFactory == null) {
+            throw new RuntimeException("The nfaFactory is null. Please init it before open().");
+        }
         nfa = nfaFactory.createNFA();
         nfa.open(cepRuntimeContext, new Configuration());
 

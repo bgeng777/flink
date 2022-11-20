@@ -22,6 +22,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.cep.pattern.conditions.IterativeCondition;
 import org.apache.flink.cep.pattern.conditions.SimpleCondition;
 import org.apache.flink.streaming.api.utils.PythonTypeUtils;
+import org.apache.flink.types.Row;
 
 import pemja.core.PythonInterpreter;
 import pemja.core.object.PyIterator;
@@ -41,12 +42,15 @@ public class SimplePythonCondition<T> extends SimpleCondition<T> {
     private static final long serialVersionUID = 4942618239408140245L;
     private final PythonInterpreter interpreter;
     private final PythonTypeUtils.DataConverter<T, Object> inputDataConverter;
+    private final PythonTypeUtils.DataConverter<?, Object> outputDataConverter;
 
     public SimplePythonCondition(
             PythonInterpreter interpreter,
-            PythonTypeUtils.DataConverter<T, Object> inputDataConverter) {
+            PythonTypeUtils.DataConverter<T, Object> inputDataConverter,
+            PythonTypeUtils.DataConverter<?, Object> outputDataConverter) {
         this.interpreter = interpreter;
         this.inputDataConverter = inputDataConverter;
+        this.outputDataConverter = outputDataConverter;
     }
 
     @Override
@@ -54,10 +58,19 @@ public class SimplePythonCondition<T> extends SimpleCondition<T> {
         PyIterator results =
                 (PyIterator)
                         interpreter.invokeMethod(
-                                "condition", "filter", inputDataConverter.toExternal(value));
+                                "operation",
+                                "process_element",
+                                inputDataConverter.toExternal(value));
         boolean result = false;
+        //        System.out.println((Row) outputDataConverter.toInternal(results.next()));
         if (results.hasNext()) {
-            result = (boolean) results.next();
+            Object obj = outputDataConverter.toInternal(results.next());
+            try {
+
+                result = Long.valueOf((Long) ((Row) obj).getField(0)) == 1;
+            } catch (RuntimeException e) {
+                throw new RuntimeException(e.getMessage() + "cast fail: " + obj);
+            }
         }
 
         return result;

@@ -168,7 +168,8 @@ public class Pattern<T, F extends T> {
     public Pattern<T, F> where(IterativeCondition<F> condition) {
         Preconditions.checkNotNull(condition, "The condition cannot be null.");
 
-        ClosureCleaner.clean(condition, ExecutionConfig.ClosureCleanerLevel.RECURSIVE, true);
+        //        ClosureCleaner.clean(condition, ExecutionConfig.ClosureCleanerLevel.TOP_LEVEL,
+        // true);
         if (this.condition == null) {
             this.condition = condition;
         } else {

@@ -11,8 +11,8 @@ def pattern(ds: DataStream, pattern: Pattern):
     class MyFilterProcessFunctionAdapter(KeyedProcessFunction):
 
         def process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
-            if self._filter_func.filter(value):
-                yield value
+            # if self._filter_func.filter(value):
+                yield self._filter_func.filter(value)
 
         def __init__(self, filter_func: Condition):
             if isinstance(filter_func, Condition):

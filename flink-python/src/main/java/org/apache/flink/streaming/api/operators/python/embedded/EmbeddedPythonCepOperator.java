@@ -30,7 +30,6 @@ import org.apache.flink.cep.nfa.aftermatch.AfterMatchSkipStrategy;
 import org.apache.flink.cep.nfa.compiler.NFACompiler;
 import org.apache.flink.cep.operator.CepOperator;
 import org.apache.flink.cep.pattern.Pattern;
-import org.apache.flink.cep.pattern.conditions.SimpleCondition;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.fnexecution.v1.FlinkFnApi;
 import org.apache.flink.python.util.ProtoUtils;
@@ -47,6 +46,7 @@ import org.apache.flink.streaming.api.operators.InternalTimerService;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.operators.Triggerable;
 import org.apache.flink.streaming.api.utils.PythonTypeUtils;
+import org.apache.flink.streaming.cep.SimplePythonCondition;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.types.Row;
@@ -91,6 +91,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
     }
 
     private ExecutionConfig executionConfig;
+    private TypeInformation<IN> inputTypeInfo;
 
     @Override
     protected <N, S extends State, T> S getOrCreateKeyedState(
@@ -107,20 +108,19 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
             TypeInformation<OUT> outputTypeInfo) {
         super(config, pythonFunctionInfo, inputTypeInfo, outputTypeInfo);
         this.executionConfig = executionConfig;
-        final TypeSerializer<IN> inputSerializer = inputTypeInfo.createSerializer(executionConfig);
+        this.inputTypeInfo = inputTypeInfo;
+
         final boolean isProcessingTime = true;
 
         final boolean timeoutHandling = false;
         Pattern<IN, ?> pattern =
                 Pattern.<IN>begin("start")
                         .where(
-                                new SimpleCondition<IN>() {
-
-                                    @Override
-                                    public boolean filter(IN value) throws Exception {
-                                        return true;
-                                    }
-                                });
+                                new SimplePythonCondition<>(
+                                        this.interpreter,
+                                        PythonTypeUtils.TypeInfoToDataConverter
+                                                .typeInfoDataConverter(inputTypeInfo),
+                                        outputDataConverter));
 
         final NFACompiler.NFAFactory<IN> nfaFactory =
                 NFACompiler.compileFactory(pattern, timeoutHandling);
@@ -140,7 +140,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                 };
         internalOperator =
                 new CepOperator<IN, K, OUT>(
-                        inputSerializer,
+                        inputTypeInfo.createSerializer(executionConfig),
                         isProcessingTime,
                         nfaFactory,
                         null,
@@ -181,7 +181,21 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
         onTimerContext = new OnTimerContextImpl(timerService);
 
         super.open();
+        final boolean timeoutHandling = false;
+        Pattern<IN, ?> pattern =
+                Pattern.<IN>begin("start")
+                        .where(
+                                new SimplePythonCondition<>(
+                                        this.interpreter,
+                                        PythonTypeUtils.TypeInfoToDataConverter
+                                                .typeInfoDataConverter(inputTypeInfo),
+                                        outputDataConverter));
+
+        final NFACompiler.NFAFactory<IN> nfaFactory =
+                NFACompiler.compileFactory(pattern, timeoutHandling);
+
         internalOperator.setTimerService(internalTimerService);
+        internalOperator.setNfaFactory(nfaFactory);
         internalOperator.open();
         internalOperator.setProcessingTimeService(this.getProcessingTimeService());
     }
