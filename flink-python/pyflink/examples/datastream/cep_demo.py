@@ -25,7 +25,7 @@ import argparse
 import logging
 import sys
 
-from pyflink.common import WatermarkStrategy, Encoder, Types
+from pyflink.common import WatermarkStrategy, Encoder, Types, Configuration
 from pyflink.datastream import StreamExecutionEnvironment, RuntimeExecutionMode
 from pyflink.datastream.cep import cep
 from pyflink.datastream.cep.condition import Condition
@@ -51,6 +51,8 @@ def create_demo_pattern():
 
 
 def cep_demo(input_path, output_path):
+    config = Configuration()
+    config.set_string("python.execution-mode", "thread")
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_runtime_mode(RuntimeExecutionMode.BATCH)
     # write all the data to one file
