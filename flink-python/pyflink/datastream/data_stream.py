@@ -1335,7 +1335,7 @@ class KeyedStream(DataStream):
         return self.process(FilterKeyedProcessFunctionAdapter(func), self._original_data_type_info)\
             .name("Filter")
 
-    def cep_process(self, func: ProcessFunction, output_type: TypeInformation = None) -> 'DataStream':
+    def cep_process(self, func: ProcessFunction, output_type: TypeInformation = None, j_pattern = None ) -> 'DataStream':
         """
         Applies the given ProcessFunction on the input stream, thereby creating a transformed output
         stream.
@@ -1354,7 +1354,8 @@ class KeyedStream(DataStream):
                 self,
                 func,
                 flink_fn_execution_pb2.UserDefinedDataStreamFunction.CEP,  # type: ignore
-                output_type)
+                output_type,
+                j_pattern)
         return DataStream(self._j_data_stream.transform(
             "CEP",
             j_output_type_info,
@@ -2809,7 +2810,8 @@ def _get_one_input_stream_operator(data_stream: DataStream,
                                                FunctionWrapper,
                                                WindowOperationDescriptor],
                                    func_type: int,
-                                   output_type: Union[TypeInformation, List] = None):
+                                   output_type: Union[TypeInformation, List] = None,
+                                   j_pattern = None):
     """
     Create a Java one input stream operator.
 
@@ -2883,7 +2885,8 @@ def _get_one_input_stream_operator(data_stream: DataStream,
                 j_exec_conf,
                 j_data_stream_python_function_info,
                 j_input_types,
-                j_output_type_info)
+                j_output_type_info,
+                j_pattern)
 
             return j_python_function_operator, j_output_type_info
         else:

@@ -26,5 +26,5 @@ def pattern(ds: DataStream, pattern: Pattern):
 
     output_type = typeinfo._from_java_type(
         ds._j_data_stream.getTransformation().getOutputType())
-    return ds.key_by(lambda x: x[0], key_type=Types.STRING()).cep_process(MyFilterProcessFunctionAdapter(pattern.condition), output_type=output_type) \
+    return ds.key_by(lambda x: x[0], key_type=Types.STRING()).cep_process(MyFilterProcessFunctionAdapter(pattern.condition), j_pattern=pattern.j_pattern, output_type=output_type) \
         .name("Cep")

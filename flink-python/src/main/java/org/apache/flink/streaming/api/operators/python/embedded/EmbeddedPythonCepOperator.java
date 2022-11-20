@@ -86,6 +86,8 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
 
     private CepOperator<IN, K, OUT> internalOperator;
 
+    private Pattern patternFromPython;
+
     ExecutionConfig getCepExecutionConfig() {
         return executionConfig;
     }
@@ -105,7 +107,8 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
             ExecutionConfig executionConfig,
             DataStreamPythonFunctionInfo pythonFunctionInfo,
             TypeInformation<IN> inputTypeInfo,
-            TypeInformation<OUT> outputTypeInfo) {
+            TypeInformation<OUT> outputTypeInfo,
+            Pattern inputPattern) {
         super(config, pythonFunctionInfo, inputTypeInfo, outputTypeInfo);
         this.executionConfig = executionConfig;
         this.inputTypeInfo = inputTypeInfo;
@@ -113,6 +116,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
         final boolean isProcessingTime = true;
 
         final boolean timeoutHandling = false;
+        patternFromPython = inputPattern;
         Pattern<IN, ?> pattern =
                 Pattern.<IN>begin("start")
                         .where(
@@ -121,6 +125,9 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                                         PythonTypeUtils.TypeInfoToDataConverter
                                                 .typeInfoDataConverter(inputTypeInfo),
                                         outputDataConverter));
+        if (patternFromPython != null) {
+            pattern.times(patternFromPython.getTimes().getFrom());
+        }
 
         final NFACompiler.NFAFactory<IN> nfaFactory =
                 NFACompiler.compileFactory(pattern, timeoutHandling);
@@ -133,7 +140,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                             throws Exception {
                         StringBuilder sb = new StringBuilder();
                         for (IN i : match.get("start")) {
-                            sb.append((String) ((Row) i).getField(0));
+                            sb.append((String) ((Row) i).getField(0)).append(",");
                         }
                         out.collect((OUT) Row.of(sb.toString()));
                     }
@@ -190,6 +197,9 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                                         PythonTypeUtils.TypeInfoToDataConverter
                                                 .typeInfoDataConverter(inputTypeInfo),
                                         outputDataConverter));
+        if (patternFromPython != null) {
+            pattern.times(patternFromPython.getTimes().getFrom());
+        }
 
         final NFACompiler.NFAFactory<IN> nfaFactory =
                 NFACompiler.compileFactory(pattern, timeoutHandling);
@@ -248,7 +258,8 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                 getCepExecutionConfig(),
                 pythonFunctionInfo,
                 getInputTypeInfo(),
-                outputTypeInfo);
+                outputTypeInfo,
+                patternFromPython);
     }
 
     private void invokeUserFunction(TimeDomain timeDomain, InternalTimer<K, VoidNamespace> timer)

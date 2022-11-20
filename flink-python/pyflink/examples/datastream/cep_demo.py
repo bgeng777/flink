@@ -35,7 +35,7 @@ from pyflink.datastream.connectors.file_system import (FileSource, StreamFormat,
 
 cep_demo_data = [
     Row(f0="11", f1=4),
-    Row(f0="22", f1=5),
+    Row(f0="11", f1=5),
     Row(f0="33", f1=6)
 ]
 
@@ -51,7 +51,7 @@ def create_demo_pattern():
             else:
                 return Row(f0=0)
 
-    pattern.where(DemoCondition())
+    pattern.where(DemoCondition()).times(2)
     return pattern
 
 

@@ -10,11 +10,13 @@ class Pattern(object):
         JPattern = self.gateway.jvm.org.apache.flink.cep.pattern.Pattern
         self.j_pattern = JPattern(name)
 
-    def times_or_more(self, times: int):
-        self.j_pattern.timesOrMore(times)
+    def times(self, times: int):
+        self.j_pattern.times(times)
+        return self
 
     def where(self, condition: Condition):
         self.condition = condition
+        return self
         # conditionJSimplePythonCondition = self.gateway.jvm.org.apache.flink.streaming.cep\
         #     .SimplePythonCondition
 

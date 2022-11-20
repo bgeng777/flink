@@ -34,6 +34,7 @@ import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -52,7 +53,8 @@ import java.util.Map;
  * @param <T> Base type of the elements appearing in the pattern
  * @param <F> Subtype of T to which the current pattern operator is constrained
  */
-public class Pattern<T, F extends T> {
+public class Pattern<T, F extends T> implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     /** Name of the pattern. */
     private final String name;

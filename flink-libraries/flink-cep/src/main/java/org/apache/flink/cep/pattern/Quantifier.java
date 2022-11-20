@@ -23,6 +23,7 @@ import org.apache.flink.util.Preconditions;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.EnumSet;
 import java.util.Objects;
 
@@ -39,7 +40,8 @@ import java.util.Objects;
  * also hava an additional inner consuming strategy that is applied between accepted events in the
  * pattern.
  */
-public class Quantifier {
+public class Quantifier implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     private final EnumSet<QuantifierProperty> properties;
 
@@ -187,7 +189,8 @@ public class Quantifier {
     }
 
     /** Describe the times this {@link Pattern} can occur. */
-    public static class Times {
+    public static class Times implements Serializable {
+        private static final long serialVersionUID = 1L;
         private final int from;
         private final int to;
         private final @Nullable Time windowTime;
