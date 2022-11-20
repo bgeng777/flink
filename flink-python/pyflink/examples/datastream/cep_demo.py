@@ -53,7 +53,7 @@ def create_demo_pattern():
 def cep_demo(input_path, output_path):
     config = Configuration()
     config.set_string("python.execution-mode", "thread")
-    env = StreamExecutionEnvironment.get_execution_environment()
+    env = StreamExecutionEnvironment.get_execution_environment(config)
     env.set_runtime_mode(RuntimeExecutionMode.BATCH)
     # write all the data to one file
     env.set_parallelism(1)
