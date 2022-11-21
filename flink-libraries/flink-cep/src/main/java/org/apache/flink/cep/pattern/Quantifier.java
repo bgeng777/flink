@@ -248,5 +248,10 @@ public class Quantifier implements Serializable {
         public int hashCode() {
             return Objects.hash(from, to, windowTime);
         }
+
+        @Override
+        public String toString() {
+            return "Times{" + "from=" + from + ", to=" + to + ", windowTime=" + windowTime + '}';
+        }
     }
 }

@@ -40,14 +40,17 @@ import pemja.core.object.PyIterator;
 public class SimplePythonCondition<T> extends SimpleCondition<T> {
 
     private static final long serialVersionUID = 4942618239408140245L;
+    private final String patternName;
     private final PythonInterpreter interpreter;
     private final PythonTypeUtils.DataConverter<T, Object> inputDataConverter;
     private final PythonTypeUtils.DataConverter<?, Object> outputDataConverter;
 
     public SimplePythonCondition(
+            String patternName,
             PythonInterpreter interpreter,
             PythonTypeUtils.DataConverter<T, Object> inputDataConverter,
             PythonTypeUtils.DataConverter<?, Object> outputDataConverter) {
+        this.patternName = patternName;
         this.interpreter = interpreter;
         this.inputDataConverter = inputDataConverter;
         this.outputDataConverter = outputDataConverter;
@@ -55,19 +58,40 @@ public class SimplePythonCondition<T> extends SimpleCondition<T> {
 
     @Override
     public boolean filter(T value) throws Exception {
-        PyIterator results = (PyIterator) interpreter.invokeMethod("operation", "dir");
+        PyIterator results = null;
+        if (!patternName.equals("start")) {
+            results =
+                    (PyIterator)
+                            interpreter.invokeMethod(
+                                    "operation",
+                                    "process_element",
+                                    inputDataConverter.toExternal(value));
+            //            return true;
+        } else {
+            results =
+                    (PyIterator)
+                            interpreter.invokeMethod(
+                                    "operation",
+                                    "my_process_element",
+                                    inputDataConverter.toExternal(value));
+        }
         boolean result = false;
         //        System.out.println((Row) outputDataConverter.toInternal(results.next()));
         if (results.hasNext()) {
             Object obj = outputDataConverter.toInternal(results.next());
             try {
 
-                result = Long.valueOf((Long) ((Row) obj).getField(0)) == 1;
+                result = (Long) ((Row) obj).getField(0) == 1;
             } catch (RuntimeException e) {
                 throw new RuntimeException(e.getMessage() + "cast fail: " + obj);
             }
         }
 
         return result;
+    }
+
+    @Override
+    public String toString() {
+        return "SimplePythonCondition{" + "patternName='" + patternName + '\'' + '}';
     }
 }

@@ -53,6 +53,16 @@ class FunctionOperation(object):
 
         return elements
 
+    def _my_process_elements(self, elements):
+        def _my_process_elements_on_operation(op, items):
+            for item in items:
+                yield from op.my_process_element(item)
+
+        for operation in self._chained_operations:
+            elements = _my_process_elements_on_operation(operation, elements)
+
+        return elements
+
     def _output_elements(self, elements):
         for item in elements:
             yield self._output_data_converter.to_external(item)
@@ -96,7 +106,7 @@ class OneInputFunctionOperation(FunctionOperation):
         results = self._main_operation.my_process_element(
             self._input_data_converter.to_internal(value))
 
-        results = self._process_elements(results)
+        results = self._my_process_elements(results)
 
         yield from self._output_elements(results)
 

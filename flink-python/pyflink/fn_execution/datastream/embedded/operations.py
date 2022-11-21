@@ -38,10 +38,11 @@ from pyflink.fn_execution.embedded.state_impl import KeyedStateBackend
 
 class OneInputOperation(operations.OneInputOperation):
 
-    def __init__(self, open_func, close_func, process_element_func, on_timer_func=None):
+    def __init__(self, open_func, close_func, process_element_func, on_timer_func=None, my_process_element_func = None):
         self._open_func = open_func
         self._close_func = close_func
         self._process_element_func = process_element_func
+        self._my_process_element_func = my_process_element_func
         self._on_timer_func = on_timer_func
 
     def open(self) -> None:
@@ -56,6 +57,9 @@ class OneInputOperation(operations.OneInputOperation):
     def on_timer(self, timestamp):
         if self._on_timer_func:
             return self._on_timer_func(timestamp)
+
+    def my_process_element(self, value):
+        return self._my_process_element_func(value)
 
 
 class TwoInputOperation(operations.TwoInputOperation):
@@ -160,18 +164,19 @@ def extract_process_function(
         runtime_context.set_keyed_state_backend(keyed_state_backend)
 
         process_element = user_defined_func.process_element
+        my_process_element = user_defined_func.my_process_element
         on_timer = user_defined_func.on_timer
 
         def process_element_func(value):
             yield from process_func(process_element(value[1], function_context))
 
         def my_process_element_func(value):
-            yield from process_func(process_element(value[1], function_context))
+            yield from process_func(my_process_element(value[1], function_context))
 
         def on_timer_func(timestamp):
             yield from process_func(on_timer(timestamp, timer_context))
 
-        return OneInputOperation(open_func, close_func, process_element_func, on_timer_func)
+        return OneInputOperation(open_func, close_func, process_element_func, on_timer_func, my_process_element_func=my_process_element_func)
 
     elif func_type == UserDefinedDataStreamFunction.CO_PROCESS:
         function_context = InternalProcessFunctionContext(j_function_context)

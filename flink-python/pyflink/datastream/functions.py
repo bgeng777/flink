@@ -726,6 +726,9 @@ class KeyedProcessFunction(Function):
                      valid during the invocation of this method, do not store it.
         """
         pass
+    @abstractmethod
+    def my_process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
+        pass
 
     def on_timer(self, timestamp: int, ctx: 'KeyedProcessFunction.OnTimerContext'):
         """

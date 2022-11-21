@@ -13,23 +13,32 @@ def pattern(ds: DataStream, pattern: Pattern):
             self.my_process_element = self._my_process_element
 
         def process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
+            return self._process_element(value, ctx)
+
+        def my_process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
             return self._my_process_element(value, ctx)
+
+        def _process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
+            # if self._filter_func.filter(value):
+            yield self._filter_func2.filter(value)
 
         def _my_process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
             # if self._filter_func.filter(value):
-                yield self._filter_func.filter(value)
+            yield self._filter_func1.filter(value)
 
-        def __init__(self, filter_func: Condition):
-            if isinstance(filter_func, Condition):
+        def __init__(self, input_pattern: Pattern):
+            if isinstance(input_pattern, Pattern):
                 self._open_func = None
                 self._close_func = None
-                self._filter_func = filter_func
+                self._filter_func1 = input_pattern.condition
+                if input_pattern.prev is not None:
+                    self._filter_func2 = input_pattern.prev.condition
+                else:
+                    self._filter_func2 = None
             else:
-                self._open_func = None
-                self._close_func = None
-                self._filter_func = filter_func
+                raise TypeError("Must be Pattern type.")
 
     output_type = typeinfo._from_java_type(
         ds._j_data_stream.getTransformation().getOutputType())
-    return ds.key_by(lambda x: x[0], key_type=Types.STRING()).cep_process(MyFilterProcessFunctionAdapter(pattern.condition), j_pattern=pattern.j_pattern, output_type=output_type) \
+    return ds.key_by(lambda x: x[0], key_type=Types.STRING()).cep_process(MyFilterProcessFunctionAdapter(pattern), j_pattern=pattern.j_pattern, output_type=output_type) \
         .name("Cep")

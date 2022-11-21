@@ -54,6 +54,7 @@ import org.apache.flink.util.Collector;
 
 import pemja.core.object.PyIterator;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -117,18 +118,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
 
         final boolean timeoutHandling = false;
         patternFromPython = inputPattern;
-        Pattern<IN, ?> pattern =
-                Pattern.<IN>begin("start")
-                        .where(
-                                new SimplePythonCondition<>(
-                                        this.interpreter,
-                                        PythonTypeUtils.TypeInfoToDataConverter
-                                                .typeInfoDataConverter(inputTypeInfo),
-                                        outputDataConverter));
-        if (patternFromPython != null) {
-            pattern.times(patternFromPython.getTimes().getFrom());
-        }
-
+        Pattern<IN, ?> pattern = parsePattern();
         final NFACompiler.NFAFactory<IN> nfaFactory =
                 NFACompiler.compileFactory(pattern, timeoutHandling);
 
@@ -139,10 +129,16 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                             Map<String, List<IN>> match, Context ctx, Collector<OUT> out)
                             throws Exception {
                         StringBuilder sb = new StringBuilder();
-                        for (IN i : match.get("start")) {
-                            sb.append((String) ((Row) i).getField(0)).append(",");
+                        for (String k : match.keySet()) {
+                            for (IN i : match.get(k)) {
+                                sb.append(k)
+                                        .append(": ")
+                                        .append((String) ((Row) i).getField(0))
+                                        .append(",")
+                                        .append(((Row) i).getField(1));
+                            }
                         }
-                        out.collect((OUT) Row.of(sb.toString()));
+                        out.collect((OUT) Row.of(sb.toString(), 1));
                     }
                 };
         internalOperator =
@@ -189,17 +185,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
 
         super.open();
         final boolean timeoutHandling = false;
-        Pattern<IN, ?> pattern =
-                Pattern.<IN>begin("start")
-                        .where(
-                                new SimplePythonCondition<>(
-                                        this.interpreter,
-                                        PythonTypeUtils.TypeInfoToDataConverter
-                                                .typeInfoDataConverter(inputTypeInfo),
-                                        outputDataConverter));
-        if (patternFromPython != null) {
-            pattern.times(patternFromPython.getTimes().getFrom());
-        }
+        Pattern<IN, ?> pattern = parsePattern();
 
         final NFACompiler.NFAFactory<IN> nfaFactory =
                 NFACompiler.compileFactory(pattern, timeoutHandling);
@@ -284,20 +270,9 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
     public void processElement(StreamRecord<IN> element) throws Exception {
         collector.setTimestamp(element);
         timestamp = element.getTimestamp();
-        //        IN value = element.getValue();
-        //        PyIterator results =
-        //                (PyIterator)
-        //                        interpreter.invokeMethod(
-        //                                "operation",
-        //                                "process_element",
-        //                                inputDataConverter.toExternal(value));
+        LOG.info("???");
+        LOG.info(String.valueOf(element.getValue()));
         internalOperator.processElement(element);
-
-        //        while (results.hasNext()) {
-        //            OUT result = outputDataConverter.toInternal(results.next());
-        //            collector.collect(result);
-        //        }
-        //        results.close();
     }
 
     private class ContextImpl {
@@ -351,5 +326,48 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
         public Object getCurrentKey() {
             return keyConverter.toExternal((K) ((Row) timer.getKey()).getField(0));
         }
+    }
+
+    private Pattern parsePattern() {
+        Pattern<IN, ?> pattern = null;
+        List<Pattern> patterns = new ArrayList<>();
+
+        Pattern curPattern = patternFromPython;
+        while (curPattern != null) {
+            patterns.add(curPattern);
+            curPattern = curPattern.getPrevious();
+        }
+        for (int i = patterns.size() - 1; i >= 0; i--) {
+            if (i == patterns.size() - 1) {
+                pattern =
+                        Pattern.<IN>begin(patterns.get(i).getName())
+                                .where(
+                                        new SimplePythonCondition<>(
+                                                patterns.get(i).getName(),
+                                                this.interpreter,
+                                                PythonTypeUtils.TypeInfoToDataConverter
+                                                        .typeInfoDataConverter(inputTypeInfo),
+                                                outputDataConverter))
+                                .times(patterns.get(i).getTimes().getFrom());
+            } else {
+                assert pattern != null;
+                assert patterns.get(i) != null;
+                assert patterns.get(i).getTimes() != null;
+                pattern =
+                        pattern.followedBy(patterns.get(i).getName())
+                                .where(
+                                        new SimplePythonCondition<>(
+                                                patterns.get(i).getName(),
+                                                this.interpreter,
+                                                PythonTypeUtils.TypeInfoToDataConverter
+                                                        .typeInfoDataConverter(inputTypeInfo),
+                                                outputDataConverter))
+                                .times(patterns.get(i).getTimes().getFrom());
+            }
+        }
+        //        throw new RuntimeException(String.valueOf(pattern));
+        //
+
+        return pattern;
     }
 }

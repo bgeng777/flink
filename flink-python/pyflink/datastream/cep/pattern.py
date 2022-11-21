@@ -9,6 +9,7 @@ class Pattern(object):
         self.gateway = get_gateway()
         JPattern = self.gateway.jvm.org.apache.flink.cep.pattern.Pattern
         self.j_pattern = JPattern(name)
+        self.prev = None
 
     def times(self, times: int):
         self.j_pattern.times(times)
@@ -19,4 +20,12 @@ class Pattern(object):
         return self
         # conditionJSimplePythonCondition = self.gateway.jvm.org.apache.flink.streaming.cep\
         #     .SimplePythonCondition
+
+    def followedBy(self, pattern):
+        tmp_j_pattern = self.j_pattern.followedBy(pattern.name)
+        # tmp_j_pattern = self.j_pattern.followedBy(pattern.j_pattern)
+        pattern.prev = self
+        # self = pattern
+        pattern.j_pattern = tmp_j_pattern
+        return pattern
 
