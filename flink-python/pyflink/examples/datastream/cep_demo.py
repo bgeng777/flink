@@ -34,9 +34,9 @@ from pyflink.datastream.connectors.file_system import (FileSource, StreamFormat,
                                                        OutputFileConfig, RollingPolicy)
 
 cep_demo_data = [
-    Row(f0="11", f1=4),
-    Row(f0="11", f1=5),
-    Row(f0="11", f1=6),
+    Row(f0="11", f1=2),
+    Row(f0="11", f1=2),
+    Row(f0="11", f1=4)
     # Row(f0="22", f1=7),
     # Row(f0="22", f1=8),
     # Row(f0="22", f1=9)
@@ -49,6 +49,7 @@ def create_demo_pattern():
     class DemoCondition(Condition):
 
         def filter(self, value) -> Row:
+            # raise Exception("U")
             if value.f1 > 3:
                 return Row(f0=1)
             else:
@@ -57,13 +58,14 @@ def create_demo_pattern():
     class DemoCondition2(Condition):
 
         def filter(self, value) -> Row:
-            if value.f1 > 3:
+            print("K")
+            if value.f1 < 3:
                 return Row(f0=1)
             else:
                 return Row(f0=0)
 
     pattern2 = Pattern("end")
-    pattern = pattern.where(DemoCondition()).times(1).followedBy(pattern2).where(
+    pattern = pattern.where(DemoCondition()).times(2).followedBy(pattern2).where(
         DemoCondition2()).times(1)
     return pattern
 

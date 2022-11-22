@@ -59,7 +59,7 @@ public class SimplePythonCondition<T> extends SimpleCondition<T> {
     @Override
     public boolean filter(T value) throws Exception {
         PyIterator results = null;
-        if (!patternName.equals("start")) {
+        if (!patternName.equals("end")) {
             results =
                     (PyIterator)
                             interpreter.invokeMethod(

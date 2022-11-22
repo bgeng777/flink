@@ -135,7 +135,7 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
                                         .append(": ")
                                         .append((String) ((Row) i).getField(0))
                                         .append(",")
-                                        .append(((Row) i).getField(1));
+                                        .append( ((Row) i).getField(1));
                             }
                         }
                         out.collect((OUT) Row.of(sb.toString(), 1));
