@@ -19,11 +19,9 @@ def pattern(ds: DataStream, pattern: Pattern):
             return self._my_process_element(value, ctx)
 
         def _process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
-            # if self._filter_func.filter(value):
             yield self._filter_func2.filter(value)
 
         def _my_process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
-            # if self._filter_func.filter(value):
             yield self._filter_func1.filter(value)
 
         def __init__(self, input_pattern: Pattern):
@@ -40,5 +38,7 @@ def pattern(ds: DataStream, pattern: Pattern):
 
     output_type = typeinfo._from_java_type(
         ds._j_data_stream.getTransformation().getOutputType())
-    return ds.key_by(lambda x: x[0], key_type=Types.STRING()).cep_process(MyFilterProcessFunctionAdapter(pattern), j_pattern=pattern.j_pattern, output_type=output_type) \
+    return ds.key_by(lambda x: x[0], key_type=Types.STRING()).cep_process(
+        MyFilterProcessFunctionAdapter(pattern), j_pattern=pattern.j_pattern,
+        output_type=output_type) \
         .name("Cep")

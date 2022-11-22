@@ -8,7 +8,8 @@ class Condition(ABC):
     @abstractmethod
     def filter(self, value):
         """
-        The filter method. Takes an element from the input data and return if it fulfills the condition.
+        The filter method. Takes an element from the input data and return if it fulfills the
+        condition.
 
         :param value: The input value.
         :return: true/false.
