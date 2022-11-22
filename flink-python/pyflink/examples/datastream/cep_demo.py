@@ -21,105 +21,75 @@
 # 2. call Java CEPOperator to create NFA and process element
 # 3. call Python udf to process matches
 
-import argparse
 import logging
 import sys
 
-from pyflink.common import WatermarkStrategy, Encoder, Types, Configuration, Row
+from pyflink.common import Types, Configuration, Row
 from pyflink.datastream import StreamExecutionEnvironment, RuntimeExecutionMode
 from pyflink.datastream.cep import cep
 from pyflink.datastream.cep.condition import Condition
 from pyflink.datastream.cep.pattern import Pattern
-from pyflink.datastream.connectors.file_system import (FileSource, StreamFormat, FileSink,
-                                                       OutputFileConfig, RollingPolicy)
 
 cep_demo_data = [
+    Row(f0="11", f1=4),
+    Row(f0="11", f1=5),
+    Row(f0="11", f1=6),
+    Row(f0="11", f1=7),
+    Row(f0="11", f1=1),
     Row(f0="11", f1=2),
-    Row(f0="11", f1=2),
-    Row(f0="11", f1=4)
-    # Row(f0="22", f1=7),
-    # Row(f0="22", f1=8),
-    # Row(f0="22", f1=9)
 ]
 
 
 def create_demo_pattern():
-    pattern = Pattern("start")
 
-    class DemoCondition(Condition):
+
+    class StartCondition(Condition):
 
         def filter(self, value) -> Row:
-            # raise Exception("U")
-            if value.f1 > 3:
+            if value.f1 > 3 and value.f1 < 8:
                 return Row(f0=1)
             else:
                 return Row(f0=0)
 
-    class DemoCondition2(Condition):
+    class EndCondition(Condition):
 
         def filter(self, value) -> Row:
-            print("K")
             if value.f1 < 3:
                 return Row(f0=1)
             else:
                 return Row(f0=0)
 
-    pattern2 = Pattern("end")
-    pattern = pattern.where(DemoCondition()).times(2).followedBy(pattern2).where(
-        DemoCondition2()).times(1)
+    start_pattern = Pattern("start")
+    end_pattern = Pattern("end")
+    pattern = start_pattern \
+        .where(StartCondition()) \
+        .times(4) \
+        .followedBy(end_pattern) \
+        .where(EndCondition()) \
+        .times(2)
     return pattern
 
 
-def cep_demo(input_path, output_path):
+def cep_demo():
+    # use thread mode
     config = Configuration()
     config.set_string("python.execution-mode", "thread")
     env = StreamExecutionEnvironment.get_execution_environment(config)
     env.set_runtime_mode(RuntimeExecutionMode.BATCH)
-    # write all the data to one file
+
     env.set_parallelism(1)
 
-    # define the sourc        ds = env.from_source(
-
-    ds = env.from_collection(collection=cep_demo_data, type_info=Types.ROW([Types.STRING(), Types.INT()]))
-
-    def split(line):
-        yield from line.split()
+    # define the source
+    ds = env.from_collection(collection=cep_demo_data,
+                             type_info=Types.ROW([Types.STRING(), Types.INT()]))
 
     pattern = create_demo_pattern()
 
-    # output = cep.pattern(input, pattern)
-    def filter_func(line):
-        return line.split(",")[1] == "1"
-
-    # output = ds.filter(
-    #     filter_func
-    # ).print()
     output = cep.pattern(ds, pattern).print()
-    # compute word count
-    # ds = ds.flat_map(split) \
-    #        .map(lambda i: (i, 1), output_type=Types.TUPLE([Types.STRING(), Types.INT()])) \
-    #        .key_by(lambda i: i[0]) \
-    #        .reduce(lambda i, j: (i[0], i[1] + j[1]))
     # submit for execution
     env.execute()
 
 
 if __name__ == '__main__':
     logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(message)s")
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--input',
-        dest='input',
-        required=False,
-        help='Input file to process.')
-    parser.add_argument(
-        '--output',
-        dest='output',
-        required=False,
-        help='Output file to write results to.')
-
-    argv = sys.argv[1:]
-    known_args, _ = parser.parse_known_args(argv)
-
-    cep_demo(known_args.input, known_args.output)
+    cep_demo()

@@ -58,7 +58,7 @@ public class SimplePythonCondition<T> extends SimpleCondition<T> {
 
     @Override
     public boolean filter(T value) throws Exception {
-        PyIterator results = null;
+        PyIterator results;
         if (!patternName.equals("end")) {
             results =
                     (PyIterator)
@@ -76,7 +76,6 @@ public class SimplePythonCondition<T> extends SimpleCondition<T> {
                                     inputDataConverter.toExternal(value));
         }
         boolean result = false;
-        //        System.out.println((Row) outputDataConverter.toInternal(results.next()));
         if (results.hasNext()) {
             Object obj = outputDataConverter.toInternal(results.next());
             try {

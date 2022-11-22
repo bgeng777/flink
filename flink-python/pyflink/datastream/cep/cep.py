@@ -1,5 +1,5 @@
 from pyflink.common import typeinfo, Types
-from pyflink.datastream import DataStream, ProcessFunction, KeyedProcessFunction, RuntimeContext
+from pyflink.datastream import DataStream, KeyedProcessFunction, RuntimeContext
 from pyflink.datastream.cep.condition import Condition
 from pyflink.datastream.cep.pattern import Pattern
 

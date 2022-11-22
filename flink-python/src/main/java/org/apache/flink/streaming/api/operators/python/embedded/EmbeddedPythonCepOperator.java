@@ -85,16 +85,16 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
 
     private transient PythonTypeUtils.DataConverter<K, Object> keyConverter;
 
-    private CepOperator<IN, K, OUT> internalOperator;
+    private final CepOperator<IN, K, OUT> internalOperator;
 
-    private Pattern patternFromPython;
+    private final Pattern patternFromPython;
 
     ExecutionConfig getCepExecutionConfig() {
         return executionConfig;
     }
 
-    private ExecutionConfig executionConfig;
-    private TypeInformation<IN> inputTypeInfo;
+    private final ExecutionConfig executionConfig;
+    private final TypeInformation<IN> inputTypeInfo;
 
     @Override
     protected <N, S extends State, T> S getOrCreateKeyedState(
@@ -270,8 +270,6 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
     public void processElement(StreamRecord<IN> element) throws Exception {
         collector.setTimestamp(element);
         timestamp = element.getTimestamp();
-        LOG.info("???");
-        LOG.info(String.valueOf(element.getValue()));
         internalOperator.processElement(element);
     }
 
@@ -366,7 +364,6 @@ public class EmbeddedPythonCepOperator<K, IN, OUT>
             }
         }
         //        throw new RuntimeException(String.valueOf(pattern));
-        //
 
         return pattern;
     }
