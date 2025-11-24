@@ -111,6 +111,10 @@ public class PythonTableFunction extends TableFunction<Row> implements PythonFun
                 "This method is a placeholder and should not be called.");
     }
 
+    public void setResultType(DataType resultType) {
+        this.resultType = resultType;
+    }
+
     @Override
     public byte[] getSerializedPythonFunction() {
         return serializedTableFunction;

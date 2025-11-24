@@ -24,6 +24,7 @@ import org.apache.flink.table.api.config.MLPredictRuntimeConfigOptions;
 import org.apache.flink.table.ml.AsyncPredictRuntimeProvider;
 import org.apache.flink.table.ml.ModelProvider;
 import org.apache.flink.table.ml.PredictRuntimeProvider;
+import org.apache.flink.table.ml.PythonPredictRuntimeProvider;
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory;
 import org.apache.flink.table.planner.calcite.RexModelCall;
 import org.apache.flink.table.planner.calcite.RexTableArgCall;
@@ -165,6 +166,9 @@ public class StreamPhysicalMLPredictTableFunction extends SingleRel implements S
 
     private @Nullable FunctionCallUtil.AsyncOptions buildAsyncOptions(
             RexModelCall modelCall, Map<String, String> runtimeConfig) {
+        if (modelCall.getModelProvider() instanceof PythonPredictRuntimeProvider) {
+            return null;
+        }
         boolean isAsyncEnabled = isAsyncMLPredict(modelCall.getModelProvider(), runtimeConfig);
         if (isAsyncEnabled) {
             return MLPredictUtil.getMergedMLPredictAsyncOptions(

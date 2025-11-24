@@ -478,7 +478,10 @@ class UserDefinedTableFunctionWrapper(UserDefinedFunctionWrapper):
             func, input_types, "general", deterministic, name)
 
         from pyflink.table.types import RowType
-        if isinstance(result_types, RowType):
+        if result_types is None:
+            self._result_types = None
+            return
+        elif isinstance(result_types, RowType):
             # DataTypes.ROW([DataTypes.FIELD("f0", DataTypes.INT()),
             #               DataTypes.FIELD("f1", DataTypes.BIGINT())])
             result_types = result_types.field_types()
@@ -502,8 +505,9 @@ class UserDefinedTableFunctionWrapper(UserDefinedFunctionWrapper):
 
     def _create_judf(self, serialized_func, j_input_types, j_function_kind):
         gateway = get_gateway()
-
-        if isinstance(self._result_types, str):
+        if self._result_types is None:
+            j_result_type = None
+        elif isinstance(self._result_types, str):
             j_result_type = self._result_types
         elif isinstance(self._result_types[0], DataType):
             j_result_types = java_utils.to_jarray(
@@ -528,7 +532,6 @@ class UserDefinedTableFunctionWrapper(UserDefinedFunctionWrapper):
 
     def _create_delegate_function(self) -> UserDefinedFunction:
         return DelegationTableFunction(self._func)
-
 
 class UserDefinedAggregateFunctionWrapper(UserDefinedFunctionWrapper):
     """

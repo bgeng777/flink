@@ -22,6 +22,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.functions.RuntimeContext;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.fnexecution.v1.FlinkFnApi;
 import org.apache.flink.streaming.api.functions.python.DataStreamPythonFunctionInfo;
 import org.apache.flink.streaming.api.utils.PythonTypeUtils;
@@ -154,6 +155,43 @@ public enum ProtoUtils {
                                                 .setValue(entry.getValue())
                                                 .build())
                         .collect(Collectors.toList()));
+        return builder.build();
+    }
+
+    public static FlinkFnApi.UserDefinedFunctions createUserDefinedFunctionsProtoWithConfiguration(
+            RuntimeContext runtimeContext,
+            PythonFunctionInfo[] userDefinedFunctions,
+            boolean isMetricEnabled,
+            boolean isProfileEnabled,
+            Configuration configuration) {
+        FlinkFnApi.UserDefinedFunctions.Builder builder =
+                FlinkFnApi.UserDefinedFunctions.newBuilder();
+        for (PythonFunctionInfo userDefinedFunction : userDefinedFunctions) {
+            builder.addUdfs(createUserDefinedFunctionProto(userDefinedFunction));
+        }
+        builder.setMetricEnabled(isMetricEnabled);
+        builder.setProfileEnabled(isProfileEnabled);
+        List<FlinkFnApi.JobParameter> globalJobParameters =
+                runtimeContext.getGlobalJobParameters().entrySet().stream()
+                        .map(
+                                entry ->
+                                        FlinkFnApi.JobParameter.newBuilder()
+                                                .setKey(entry.getKey())
+                                                .setValue(entry.getValue())
+                                                .build())
+                        .collect(Collectors.toList());
+
+        List<FlinkFnApi.JobParameter> perJobConfigs =
+                configuration.toMap().entrySet().stream()
+                        .map(
+                                entry ->
+                                        FlinkFnApi.JobParameter.newBuilder()
+                                                .setKey(entry.getKey())
+                                                .setValue(entry.getValue())
+                                                .build())
+                        .collect(Collectors.toList());
+        builder.addAllJobParameters(globalJobParameters);
+        builder.addAllJobParameters(perJobConfigs);
         return builder.build();
     }
 
