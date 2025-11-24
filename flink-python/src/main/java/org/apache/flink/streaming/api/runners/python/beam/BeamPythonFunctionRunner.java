@@ -293,10 +293,9 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
                     && config.get(USE_MANAGED_MEMORY)
                     && (managedMemoryFraction <= 0 || managedMemoryFraction > 1.0)) {
                 LOG.warn(
-                        String.format(
-                                "The configured managed memory fraction for Python worker process must be within (0, 1], was: %s, use off-heap memory instead."
-                                        + "Please see config option \"taskmanager.memory.managed.consumer-weights\" for more details.",
-                                managedMemoryFraction));
+                        "The configured managed memory fraction for Python worker process must be within (0, 1], was: {}, use off-heap memory instead."
+                                + "Please see config option \"taskmanager.memory.managed.consumer-weights\" for more details.",
+                        managedMemoryFraction);
             }
             // there is no way to access the MemoryManager for the batch job of old planner,
             // fallback to the way that spawning a Python process for each Python operator

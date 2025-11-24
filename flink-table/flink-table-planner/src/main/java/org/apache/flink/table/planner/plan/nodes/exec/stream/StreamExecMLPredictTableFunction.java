@@ -25,22 +25,30 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.PipelineOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.functions.async.AsyncFunction;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.ProcessOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.async.AsyncWaitOperatorFactory;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.DataTypeFactory;
+import org.apache.flink.table.connector.Projection;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.AsyncPredictFunction;
 import org.apache.flink.table.functions.PredictFunction;
+import org.apache.flink.table.functions.PythonPredictFunction;
 import org.apache.flink.table.functions.UserDefinedFunction;
+import org.apache.flink.table.functions.python.PythonFunction;
+import org.apache.flink.table.functions.python.PythonFunctionInfo;
+import org.apache.flink.table.functions.python.PythonFunctionInfoWithConfig;
 import org.apache.flink.table.ml.AsyncPredictRuntimeProvider;
 import org.apache.flink.table.ml.ModelProvider;
 import org.apache.flink.table.ml.PredictRuntimeProvider;
+import org.apache.flink.table.ml.PythonPredictRuntimeProvider;
 import org.apache.flink.table.planner.calcite.FlinkContext;
 import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
 import org.apache.flink.table.planner.codegen.FunctionCallCodeGenerator;
 import org.apache.flink.table.planner.codegen.MLPredictCodeGenerator;
+import org.apache.flink.table.planner.codegen.ProjectionCodeGenerator;
 import org.apache.flink.table.planner.delegation.PlannerBase;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeBase;
@@ -51,12 +59,15 @@ import org.apache.flink.table.planner.plan.nodes.exec.InputProperty;
 import org.apache.flink.table.planner.plan.nodes.exec.MultipleTransformationTranslator;
 import org.apache.flink.table.planner.plan.nodes.exec.spec.MLPredictSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.spec.ModelSpec;
+import org.apache.flink.table.planner.plan.nodes.exec.utils.CommonPythonUtil;
 import org.apache.flink.table.planner.plan.nodes.exec.utils.ExecNodeUtil;
 import org.apache.flink.table.planner.plan.utils.FunctionCallUtil;
 import org.apache.flink.table.runtime.collector.ListenableCollector;
 import org.apache.flink.table.runtime.functions.ml.ModelPredictRuntimeProviderContext;
 import org.apache.flink.table.runtime.generated.GeneratedCollector;
 import org.apache.flink.table.runtime.generated.GeneratedFunction;
+import org.apache.flink.table.runtime.generated.GeneratedProjection;
+import org.apache.flink.table.runtime.operators.join.FlinkJoinType;
 import org.apache.flink.table.runtime.operators.ml.AsyncMLPredictRunner;
 import org.apache.flink.table.runtime.operators.ml.MLPredictRunner;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -68,8 +79,12 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import static org.apache.flink.table.planner.plan.nodes.exec.common.CommonExecPythonCorrelate.PYTHON_TABLE_FUNCTION_OPERATOR_NAME;
 
 /** Stream {@link ExecNode} for {@code ML_PREDICT}. */
 @ExecNodeMetadata(
@@ -147,7 +162,13 @@ public class StreamExecMLPredictTableFunction extends ExecNodeBase<RowData>
 
         ModelProvider provider = modelSpec.getModelProvider(planner.getFlinkContext());
         boolean async = asyncOptions != null;
-        UserDefinedFunction predictFunction = findModelFunction(provider, async);
+        boolean isPython = provider instanceof PythonPredictRuntimeProvider;
+        UserDefinedFunction predictFunction;
+        if (isPython) {
+            predictFunction = findPythonModelFunction(provider, async);
+        } else {
+            predictFunction = findModelFunction(provider, async);
+        }
         FlinkContext context = planner.getFlinkContext();
         DataTypeFactory dataTypeFactory = context.getCatalogManager().getDataTypeFactory();
 
@@ -160,6 +181,21 @@ public class StreamExecMLPredictTableFunction extends ExecNodeBase<RowData>
                                 .getResolvedOutputSchema()
                                 .toPhysicalRowDataType()
                                 .getLogicalType();
+
+        if (isPython) {
+            final Configuration pythonConfig =
+                    CommonPythonUtil.extractPythonConfiguration(
+                            planner.getTableConfig(), planner.getFlinkContext().getClassLoader());
+            return createPythonModelPredict(
+                    inputTransformation,
+                    config,
+                    planner.getFlinkContext().getClassLoader(),
+                    pythonConfig,
+                    inputType,
+                    modelOutputType,
+                    (PythonPredictFunction) predictFunction);
+        }
+
         return async
                 ? createAsyncModelPredict(
                         inputTransformation,
@@ -262,6 +298,113 @@ public class StreamExecMLPredictTableFunction extends ExecNodeBase<RowData>
                 false);
     }
 
+    private Transformation<RowData> createPythonModelPredict(
+            Transformation<RowData> inputTransformation,
+            ExecNodeConfig config,
+            ClassLoader classLoader,
+            Configuration pythonEnvConfig,
+            RowType inputRowType,
+            RowType modelOutputType,
+            PythonPredictFunction pythonPredictFunction) {
+        List<Integer> featureIndices = getFeatureIndices();
+        Object[] inputs = featureIndices.toArray(new Integer[0]);
+        PythonFunction pythonFunction = pythonPredictFunction.createPythonFunction(pythonEnvConfig);
+        PythonFunctionInfo pythonFunctionInfo =
+                new PythonFunctionInfoWithConfig(
+                        pythonFunction, inputs, pythonPredictFunction.getModelConfig());
+
+        OneInputStreamOperator<RowData, RowData> pythonOperator =
+                getPythonTableFunctionOperator(
+                        config,
+                        classLoader,
+                        pythonEnvConfig,
+                        inputRowType,
+                        modelOutputType,
+                        pythonFunctionInfo,
+                        featureIndices);
+        return ExecNodeUtil.createOneInputTransformation(
+                inputTransformation,
+                createTransformationMeta(ML_PREDICT_TRANSFORMATION, config),
+                pythonOperator,
+                InternalTypeInfo.of(getOutputType()),
+                inputTransformation.getParallelism(),
+                false);
+    }
+
+    private List<Integer> getFeatureIndices() {
+        List<FunctionCallUtil.FunctionParam> features = mlPredictSpec.getFeatures();
+        List<Integer> featureIndices = new ArrayList<>();
+        for (FunctionCallUtil.FunctionParam param : features) {
+            if (param instanceof FunctionCallUtil.FieldRef) {
+                FunctionCallUtil.FieldRef fieldRef = (FunctionCallUtil.FieldRef) param;
+                featureIndices.add(fieldRef.index);
+            } else {
+                throw new TableException(
+                        String.format("Unknown operand for descriptor operator: %s.", param));
+            }
+        }
+        return featureIndices;
+    }
+
+    private OneInputStreamOperator<RowData, RowData> getPythonTableFunctionOperator(
+            ExecNodeConfig config,
+            ClassLoader classLoader,
+            Configuration pythonConfig,
+            RowType inputType,
+            RowType modelOutputType,
+            PythonFunctionInfo pythonFunctionInfo,
+            List<Integer> udtfInputIndices) {
+        int[] udtfInputIndicesArr = udtfInputIndices.stream().mapToInt(Integer::intValue).toArray();
+        boolean isInProcessMode =
+                CommonPythonUtil.isPythonWorkerInProcessMode(pythonConfig, classLoader);
+        final RowType udfInputType =
+                (RowType) Projection.of(udtfInputIndicesArr).project(inputType);
+        // Note: CommonExecPythonCorrelate.getPythonTableFunctionOperator extracts udfOutputType via
+        // projection on `outputType`.
+        // Codes look like:
+        //        final RowType udfOutputType  =
+        //                (RowType)Projection.range(inputType.getFieldCount(),
+        // outputType.getFieldCount())
+        //                        .project(outputType);
+        // It works as UDTF can be considered as joining 2 tables but ML_PREDICT provide
+        // `modelOutputType` directly so here we use it as the source of truth.
+
+        try {
+            if (isInProcessMode) {
+                Class<?> clazz =
+                        CommonPythonUtil.loadClass(
+                                PYTHON_TABLE_FUNCTION_OPERATOR_NAME, classLoader);
+                Constructor<?> ctor =
+                        clazz.getConstructor(
+                                Configuration.class,
+                                PythonFunctionInfo.class,
+                                RowType.class,
+                                RowType.class,
+                                RowType.class,
+                                FlinkJoinType.class,
+                                GeneratedProjection.class);
+                return (OneInputStreamOperator<RowData, RowData>)
+                        ctor.newInstance(
+                                pythonConfig,
+                                pythonFunctionInfo,
+                                inputType,
+                                udfInputType,
+                                modelOutputType,
+                                FlinkJoinType.INNER,
+                                ProjectionCodeGenerator.generateProjection(
+                                        new CodeGeneratorContext(config, classLoader),
+                                        "UdtfInputProjection",
+                                        inputType,
+                                        udfInputType,
+                                        udtfInputIndicesArr));
+            } else {
+                throw new UnsupportedOperationException("Thread mode is supported.");
+            }
+        } catch (Exception e) {
+            throw new TableException("Python Table Function Operator constructed failed.", e);
+        }
+    }
+
     private UserDefinedFunction findModelFunction(ModelProvider provider, boolean async) {
         ModelPredictRuntimeProviderContext context =
                 new ModelPredictRuntimeProviderContext(
@@ -281,6 +424,26 @@ public class StreamExecMLPredictTableFunction extends ExecNodeBase<RowData>
                 "Required "
                         + (async ? "async" : "sync")
                         + " model function by planner, but ModelProvider "
+                        + "does not offer a valid model function.");
+    }
+
+    private UserDefinedFunction findPythonModelFunction(ModelProvider provider, boolean async) {
+        ModelPredictRuntimeProviderContext context =
+                new ModelPredictRuntimeProviderContext(
+                        modelSpec.getContextResolvedModel().getResolvedModel(),
+                        Configuration.fromMap(mlPredictSpec.getRuntimeConfig()));
+
+        if (async) {
+            throw new TableException("Async python model function is not supported yet.");
+        } else {
+            if (provider instanceof PythonPredictRuntimeProvider) {
+                return ((PythonPredictRuntimeProvider) provider)
+                        .createPythonPredictFunction(context);
+            }
+        }
+
+        throw new TableException(
+                "Required python model function by planner, but ModelProvider "
                         + "does not offer a valid model function.");
     }
 }

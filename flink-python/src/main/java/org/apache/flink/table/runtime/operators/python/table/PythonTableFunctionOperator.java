@@ -31,6 +31,7 @@ import org.apache.flink.table.data.utils.JoinedRowData;
 import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.table.functions.python.PythonEnv;
 import org.apache.flink.table.functions.python.PythonFunctionInfo;
+import org.apache.flink.table.functions.python.PythonFunctionInfoWithConfig;
 import org.apache.flink.table.runtime.generated.GeneratedProjection;
 import org.apache.flink.table.runtime.generated.Projection;
 import org.apache.flink.table.runtime.operators.join.FlinkJoinType;
@@ -156,11 +157,23 @@ public class PythonTableFunctionOperator
 
     @Override
     public FlinkFnApi.UserDefinedFunctions createUserDefinedFunctionsProto() {
-        return ProtoUtils.createUserDefinedFunctionsProto(
-                getRuntimeContext(),
-                new PythonFunctionInfo[] {tableFunction},
-                config.get(PYTHON_METRIC_ENABLED),
-                config.get(PYTHON_PROFILE_ENABLED));
+        if (tableFunction instanceof PythonFunctionInfoWithConfig) {
+            PythonFunctionInfoWithConfig pythonFunctionInfoWithConfig =
+                    (PythonFunctionInfoWithConfig) tableFunction;
+            Configuration udfConfig = pythonFunctionInfoWithConfig.getConfig();
+            return ProtoUtils.createUserDefinedFunctionsProtoWithConfiguration(
+                    getRuntimeContext(),
+                    new PythonFunctionInfo[] {tableFunction},
+                    config.get(PYTHON_METRIC_ENABLED),
+                    config.get(PYTHON_PROFILE_ENABLED),
+                    udfConfig);
+        } else {
+            return ProtoUtils.createUserDefinedFunctionsProto(
+                    getRuntimeContext(),
+                    new PythonFunctionInfo[] {tableFunction},
+                    config.get(PYTHON_METRIC_ENABLED),
+                    config.get(PYTHON_PROFILE_ENABLED));
+        }
     }
 
     @Override

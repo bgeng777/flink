@@ -82,11 +82,11 @@ public final class PythonTypeUtils {
     private static final String EMPTY_STRING = "";
 
     public static FlinkFnApi.Schema.FieldType toProtoType(LogicalType logicalType) {
-        return logicalType.accept(new PythonTypeUtils.LogicalTypeToProtoTypeConverter());
+        return logicalType.accept(new LogicalTypeToProtoTypeConverter());
     }
 
     public static TypeSerializer toInternalSerializer(LogicalType logicalType) {
-        return logicalType.accept(new LogicalTypetoInternalSerializerConverter());
+        return logicalType.accept(new LogicalTypeToInternalSerializerConverter());
     }
 
     public static DataConverter toDataConverter(LogicalType logicalType) {
@@ -111,7 +111,7 @@ public final class PythonTypeUtils {
         return bigDecimal;
     }
 
-    private static class LogicalTypetoInternalSerializerConverter
+    private static class LogicalTypeToInternalSerializerConverter
             extends LogicalTypeDefaultVisitor<TypeSerializer> {
         @Override
         public TypeSerializer visit(BooleanType booleanType) {

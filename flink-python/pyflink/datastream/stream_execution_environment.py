@@ -871,6 +871,10 @@ class StreamExecutionEnvironment(object):
 
         python_worker_execution_mode = os.environ.get('_python_worker_execution_mode')
 
+        # 打印以确认设置成功
+        # print(f"Mode set to: loopback")
+        # python_worker_execution_mode = 'loopback'
+
         if python_worker_execution_mode is None:
             if is_local_deployment(j_configuration):
                 startup_loopback_server()
