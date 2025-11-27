@@ -45,7 +45,7 @@ class VLLMFunc(TableFunction):
         print(f"eval promt: {prompt}")
         if prompt:
             if self.model:
-                outputs = self.model.generate(prompt, self.sampling_params)
+                outputs = self.model.generate( prompt, self.sampling_params)
                 generated_text = outputs[0].outputs[0].text
                 print(f"Generated text: {generated_text}")
                 yield generated_text, len(generated_text)

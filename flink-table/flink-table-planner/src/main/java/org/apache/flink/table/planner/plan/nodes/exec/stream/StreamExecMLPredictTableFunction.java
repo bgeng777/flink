@@ -40,6 +40,7 @@ import org.apache.flink.table.functions.UserDefinedFunction;
 import org.apache.flink.table.functions.python.PythonFunction;
 import org.apache.flink.table.functions.python.PythonFunctionInfo;
 import org.apache.flink.table.functions.python.PythonFunctionInfoWithConfig;
+import org.apache.flink.table.functions.python.PythonTableFunction;
 import org.apache.flink.table.ml.AsyncPredictRuntimeProvider;
 import org.apache.flink.table.ml.ModelProvider;
 import org.apache.flink.table.ml.PredictRuntimeProvider;
@@ -72,6 +73,7 @@ import org.apache.flink.table.runtime.operators.ml.AsyncMLPredictRunner;
 import org.apache.flink.table.runtime.operators.ml.MLPredictRunner;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.table.types.utils.TypeConversions;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -312,7 +314,11 @@ public class StreamExecMLPredictTableFunction extends ExecNodeBase<RowData>
         PythonFunctionInfo pythonFunctionInfo =
                 new PythonFunctionInfoWithConfig(
                         pythonFunction, inputs, pythonPredictFunction.getModelConfig());
-
+        if (pythonFunction instanceof PythonTableFunction) {
+            PythonTableFunction pythonTableFunction = (PythonTableFunction) pythonFunction;
+            pythonTableFunction.setResultType(
+                    TypeConversions.fromLogicalToDataType(modelOutputType));
+        }
         OneInputStreamOperator<RowData, RowData> pythonOperator =
                 getPythonTableFunctionOperator(
                         config,

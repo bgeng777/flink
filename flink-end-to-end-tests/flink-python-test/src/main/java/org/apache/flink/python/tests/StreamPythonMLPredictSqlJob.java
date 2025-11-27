@@ -28,7 +28,7 @@ import java.util.List;
 
 import static org.apache.flink.table.api.Expressions.row;
 
-/** A simple job used to test submitting the Python UDF job in stream mode. */
+/** A simple job used to test submitting the Python ML Predict job in stream mode. */
 public class StreamPythonMLPredictSqlJob {
 
     public static void main(String[] args) {
@@ -37,53 +37,40 @@ public class StreamPythonMLPredictSqlJob {
         env.setParallelism(1);
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
         Configuration config = tEnv.getConfig().getConfiguration();
+        String pythonInterpreterPath = "/Users/kenken/opensource/py312/bin/python";
+        String pythonFilesPath =
+                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/huggingface_udtf.py";
+        config.setString("python.files", "file://" + pythonFilesPath);
+        config.setString("python.executable", pythonInterpreterPath);
+        config.setString("python.client.executable", pythonInterpreterPath);
 
-        //        config.setString("python.files",
-        // "file:///Users/kenken/PycharmProjects/inferenceDemo/vllm_udtf.py");
-        config.setString(
-                "python.files",
-//                "file:///Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/huggingface_udtf.py");
-                "file:///Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/vllm_udtf.py");
-        config.setString("python.executable", "/Users/kenken/opensource/py312/bin/python");
-        config.setString("python.client.executable", "/Users/kenken/opensource/py312/bin/python");
-
-        //        tEnv.createTemporaryView("source", tEnv.fromValues("请用一句话介绍什么是量子计算", "wednesday is
-        // good day", "what is vllm").as("question"));
         tEnv.createTemporaryView(
                 "source",
                 tEnv.fromValues(
-                                // 声明 schema
                                 DataTypes.ROW(
-                                        DataTypes.FIELD("text", DataTypes.STRING()),
-                                        DataTypes.FIELD("src_comment", DataTypes.STRING()),
-                                        DataTypes.FIELD("src_length", DataTypes.INT())),
-                                // 填入几行测试数据
-                                row("请用一句话介绍什么是量子计算", "first row", 5),
-                                row("wednesday is good day", "second row", 5),
+                                        DataTypes.FIELD("prompt", DataTypes.STRING()),
+                                        DataTypes.FIELD("prompt_comment", DataTypes.STRING()),
+                                        DataTypes.FIELD("request_id", DataTypes.INT())),
+                                row("tell me a joke", "first row", 5),
+                                row("what is pyflink", "second row", 5),
                                 row("what is vllm", "third row", 9))
-                        .as("text", "src_comment", "src_length"));
+                        .as("prompt", "prompt_comment", "request_id"));
         tEnv.executeSql(
                 "CREATE MODEL my_python_model\n"
-                        + "INPUT (text STRING, i_comment STRING)\n"
+                        + "INPUT (prompt STRING, i_comment STRING)\n"
                         + "OUTPUT (prediction STRING, "
                         + " length INT)\n"
                         + "WITH (\n"
                         + "   'provider' = 'generic-python',\n"
                         + "   'model' = '/Users/kenken/.cache/modelscope/hub/models/Qwen/Qwen3-0.6B',\n"
-//                        + "   'python-predict-function' = 'huggingface_udtf.HuggingFaceMLUDTF',\n"
-                        + "   'python-predict-function' = 'vllm_udtf.VLLMMLUDTF',\n"
+                        + "   'python-predict-function' = 'huggingface_udtf.HuggingFaceModelUDTF',\n"
                         + "   'properties.device_map' = 'auto'\n"
                         + ")");
-        //        System.out.println(
-        //                tEnv.explainSql(
-        //                        "SELECT text, src_comment, prediction, length "
-        //                                + "FROM ML_PREDICT(TABLE source, MODEL my_python_model,
-        // DESCRIPTOR(text, src_comment)) "));
         List<Row> result =
                 CollectionUtil.iteratorToList(
                         tEnv.executeSql(
-                                        "SELECT text, src_comment, prediction, length "
-                                                + "FROM ML_PREDICT(TABLE source, MODEL my_python_model, DESCRIPTOR(text, src_comment)) ")
+                                        "SELECT prompt, prompt_comment, prediction, length "
+                                                + "FROM ML_PREDICT(TABLE source, MODEL my_python_model, DESCRIPTOR(prompt, prompt_comment)) ")
                                 .collect());
 
         for (Row row : result) {

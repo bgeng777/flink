@@ -18,7 +18,7 @@
 import unittest
 
 from pyflink.common import Row
-from pyflink.table import DataTypes
+from pyflink.table import DataTypes, FunctionContext
 from pyflink.table.udf import TableFunction, udtf, ScalarFunction, udf
 from pyflink.table.expressions import col
 from pyflink.testing import source_sink_utils
