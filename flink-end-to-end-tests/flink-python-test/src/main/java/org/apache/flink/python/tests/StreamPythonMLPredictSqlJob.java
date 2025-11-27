@@ -42,7 +42,8 @@ public class StreamPythonMLPredictSqlJob {
         // "file:///Users/kenken/PycharmProjects/inferenceDemo/vllm_udtf.py");
         config.setString(
                 "python.files",
-                "file:///Users/kenken/PycharmProjects/inferenceDemo/huggingface_udtf.py");
+//                "file:///Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/huggingface_udtf.py");
+                "file:///Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/vllm_udtf.py");
         config.setString("python.executable", "/Users/kenken/opensource/py312/bin/python");
         config.setString("python.client.executable", "/Users/kenken/opensource/py312/bin/python");
 
@@ -69,8 +70,8 @@ public class StreamPythonMLPredictSqlJob {
                         + "WITH (\n"
                         + "   'provider' = 'generic-python',\n"
                         + "   'model' = '/Users/kenken/.cache/modelscope/hub/models/Qwen/Qwen3-0.6B',\n"
-                        + "   'python-predict-function' = 'huggingface_udtf.HuggingFaceMLUDTF',\n"
-                        //                + "   'python-predict-class' = 'vllm_udtf.VLLMMLUDTF',\n"
+//                        + "   'python-predict-function' = 'huggingface_udtf.HuggingFaceMLUDTF',\n"
+                        + "   'python-predict-function' = 'vllm_udtf.VLLMMLUDTF',\n"
                         + "   'properties.device_map' = 'auto'\n"
                         + ")");
         //        System.out.println(
