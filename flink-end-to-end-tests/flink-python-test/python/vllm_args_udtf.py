@@ -49,36 +49,19 @@ class VLLMFunc(TableFunction):
 
                 cli_args_string = runtime_context.get_job_parameter("vllm.args", None)
                 if cli_args_string is None:
-                    self.model = LLM(model=model_dir,
-                                     max_model_len=256,
-                                     trust_remote_code=True,
-                                     dtype="half",
-                                     enforce_eager=True)
+                    self.model = LLM(model=model_dir)
                     return
-                cli_args_string += " --model " + model_dir
                 args_list = shlex.split(cli_args_string)
-                print(f"args_list: {cli_args_string} {args_list} ")
+                args_list.append("--model")
+                args_list.append(model_dir)
                 parser = FlexibleArgumentParser(
                     description="parsing vLLM EngineArgs in pyflink"
                 )
                 parser = EngineArgs.add_cli_args(parser)
-                if "--enforce_eager" in [action.option_strings[0] for action in parser._actions]:
-                    print("✅ 诊断：解析器中找到了 --enforce_eager 选项。")
-                else:
-                    print(
-                        "❌ 诊断：解析器中未找到 --enforce_eager 选项。请检查 vLLM 版本或 EngineArgs 的定义。")
                 ns, args = parser.parse_known_args(args_list)
-                print(f"args engine_args: {args} ")
                 engine_args = EngineArgs.from_cli_args(ns)
-                print(f"ns engine_args: {ns} ")
-                print(f"engine_args engine_args: {engine_args} ")
 
                 self.model = LLM(**dataclasses.asdict(engine_args))
-                # LLM(model=model_dir,
-                #                  max_model_len=256,
-                #                  trust_remote_code=True,
-                #                  dtype="half",
-                #                  enforce_eager=True)
                 self.sampling_params = SamplingParams(
                     temperature=0.7,
                     top_p=0.9,
@@ -97,4 +80,7 @@ class VLLMFunc(TableFunction):
                 yield generated_text, len(generated_text)
             else:
                 yield "no model specified", 0
+
+    def close(self):
+        self.model.close()
 VLLMMLUDTF = udtf(VLLMFunc())
