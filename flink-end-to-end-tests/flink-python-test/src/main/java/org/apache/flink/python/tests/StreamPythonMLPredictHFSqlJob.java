@@ -28,8 +28,8 @@ import java.util.List;
 
 import static org.apache.flink.table.api.Expressions.row;
 
-/** A simple job used to test submitting the Python ML Predict job in stream mode. */
-public class StreamPythonMLPredictSqlJob {
+/** A simple job used to test submitting the Python ML Predict job using Hugging Face. */
+public class StreamPythonMLPredictHFSqlJob {
 
     public static void main(String[] args) {
         long startTime = System.currentTimeMillis();
@@ -38,10 +38,8 @@ public class StreamPythonMLPredictSqlJob {
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);
         Configuration config = tEnv.getConfig().getConfiguration();
         String pythonInterpreterPath = "/Users/kenken/opensource/py312/bin/python";
-//        String pythonFilesPath =
-//                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/huggingface_udtf.py";
         String pythonFilesPath =
-                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/vllm_args_udtf.py";
+                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/huggingface_udtf.py";
         config.setString("python.files", "file://" + pythonFilesPath);
         config.setString("python.executable", pythonInterpreterPath);
         config.setString("python.client.executable", pythonInterpreterPath);
@@ -65,10 +63,8 @@ public class StreamPythonMLPredictSqlJob {
                         + "WITH (\n"
                         + "   'provider' = 'generic-python',\n"
                         + "   'model' = '/Users/kenken/.cache/modelscope/hub/models/Qwen/Qwen3-0.6B',\n"
-//                        + "   'python-predict-function' = 'huggingface_udtf.HuggingFaceModelUDTF',\n"
-                        + "   'python-predict-function' = 'vllm_args_udtf.VLLMMLUDTF',\n"
-//                        + "   'properties.device_map' = 'auto'\n"
-                        + "   'properties.vllm.args' = '--max-model-len 256 --trust-remote-code True --dtype half --enforce-eager True'\n"
+                        + "   'python-predict-function' = 'huggingface_udtf.HuggingFaceModelUDTF',\n"
+                        + "   'properties.device_map' = 'auto'\n"
                         + ")");
         List<Row> result =
                 CollectionUtil.iteratorToList(
