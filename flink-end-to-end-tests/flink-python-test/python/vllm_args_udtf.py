@@ -55,9 +55,9 @@ class VLLMFunc(TableFunction):
                 outputs = self.model.generate(prompt, self.sampling_params)
                 generated_text = outputs[0].outputs[0].text
                 print(f"Generated text: {generated_text}")
-                yield generated_text, len(generated_text)
+                return [generated_text, len(generated_text)]
             else:
-                yield "no model specified", 0
+                return ["no model specified", 0]
 
 
 VLLMMLUDTF = udtf(VLLMFunc())

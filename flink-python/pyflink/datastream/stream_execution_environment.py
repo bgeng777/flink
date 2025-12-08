@@ -870,7 +870,7 @@ class StreamExecutionEnvironment(object):
                 "python.loopback-server.address", BeamFnLoopbackWorkerPoolServicer().start())
 
         python_worker_execution_mode = os.environ.get('_python_worker_execution_mode')
-
+        python_worker_execution_mode = 'loopback'
         if python_worker_execution_mode is None:
             if is_local_deployment(j_configuration):
                 startup_loopback_server()

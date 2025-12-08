@@ -53,7 +53,7 @@ public interface PythonFunctionRunner extends AutoCloseable {
      *     empty. f0 means the byte array buffer which stores the Python function result. f1 means
      *     the length of the Python function result byte array.
      */
-    Tuple3<String, byte[], Integer> pollResult() throws Exception;
+    Tuple3<String, byte[], Integer>  pollResult() throws Exception;
 
     /**
      * Retrieves the Python function result, waiting if necessary until an element becomes

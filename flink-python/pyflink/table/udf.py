@@ -397,7 +397,7 @@ class UserDefinedFunctionWrapper(object):
                 JPythonFunctionKind = gateway.jvm.org.apache.flink.table.functions.python. \
                     PythonFunctionKind
                 if self._func_type == "general":
-                    return JPythonFunctionKind.GENERAL
+                    return JPythonFunctionKind.PANDAS
                 elif self._func_type == "pandas":
                     return JPythonFunctionKind.PANDAS
                 else:
@@ -475,7 +475,7 @@ class UserDefinedTableFunctionWrapper(UserDefinedFunctionWrapper):
 
     def __init__(self, func, input_types, result_types, deterministic=None, name=None):
         super(UserDefinedTableFunctionWrapper, self).__init__(
-            func, input_types, "general", deterministic, name)
+            func, input_types, "pandas", deterministic, name)
 
         from pyflink.table.types import RowType
         if result_types is None:

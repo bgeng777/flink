@@ -58,8 +58,7 @@ public class StreamPythonMLPredictHFSqlJob {
         tEnv.executeSql(
                 "CREATE MODEL my_python_model\n"
                         + "INPUT (prompt STRING, i_comment STRING)\n"
-                        + "OUTPUT (prediction STRING, "
-                        + " length INT)\n"
+                        + "OUTPUT (prediction STRING)\n"
                         + "WITH (\n"
                         + "   'provider' = 'generic-python',\n"
                         + "   'model' = '/Users/kenken/.cache/modelscope/hub/models/Qwen/Qwen3-0.6B',\n"
@@ -69,7 +68,7 @@ public class StreamPythonMLPredictHFSqlJob {
         List<Row> result =
                 CollectionUtil.iteratorToList(
                         tEnv.executeSql(
-                                        "SELECT prompt, prompt_comment, prediction, length "
+                                        "SELECT prompt, prompt_comment, prediction "
                                                 + "FROM ML_PREDICT(TABLE source, MODEL my_python_model, DESCRIPTOR(prompt, prompt_comment)) ")
                                 .collect());
 

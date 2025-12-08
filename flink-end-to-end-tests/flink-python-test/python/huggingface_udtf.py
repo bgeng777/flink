@@ -1,5 +1,8 @@
 import logging
 
+import pandas as pd
+
+from pandas import Series
 from pyflink.table.udf import TableFunction, udtf
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
@@ -27,9 +30,25 @@ class HuggingFaceFunc(TableFunction):
         )
         assert self.model is not None
 
-    def eval(self, content: str, comment: str):
-        output = self.pipeline(content)[0]["generated_text"]
-        yield output, len(output)
+    # def eval(self, content: str, comment: str):
+    #     print(f"debug eval: {content} {comment}")
+    #
+    #     output = self.pipeline(content)[0]["generated_text"]
+    #     return [(output, len(output))]
+    def eval(self, content: Series, comment: Series):
+        print(f"debug eval: {content} {comment}")
+
+        outputs = self.pipeline(content.tolist())
+        results = [
+            item[0]["generated_text"]
+            for item in outputs
+        ]
+        print(results)
+        return  pd.Series(results)
+
+        # output = self.pipeline(content)[0]["generated_text"]
+        # return [(output, len(output))]
+
 
 
 HuggingFaceModelUDTF = udtf(HuggingFaceFunc())
