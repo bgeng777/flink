@@ -267,6 +267,7 @@ public class ArrowPythonTableFunctionOperator
             bais.setBuffer(udfResult, 0, length);
             int rowCount = arrowSerializer.load();
             if (rowCount  > 0) {
+                System.out.println("rowCount: " + rowCount);
                 for (int i = 0; i < rowCount; i++) {
                     RowData input = forwardedInputQueue.poll();
                     reuseJoinedRow.setRowKind(input.getRowKind());

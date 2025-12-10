@@ -151,7 +151,6 @@ public abstract class AbstractPythonFunctionOperator<OUT> extends AbstractStream
     @Override
     public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
         try {
-            invokeFinishBundle();
         } finally {
             super.prepareSnapshotPreBarrier(checkpointId);
         }

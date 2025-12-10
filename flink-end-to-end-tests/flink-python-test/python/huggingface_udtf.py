@@ -45,6 +45,11 @@ class HuggingFaceFunc(TableFunction):
         ]
         print(results)
         return  pd.Series(results)
+        # return List[str]
+        # return [Series(Series()),  Series(Series())]
+        # return pd.DataFrame(pd.Series(results), pd.Series(results))
+        # [ DataFrame ], each dataframe is the result of an input row. each dataframe is m * n, m is the number of results for the given input row, n is the number of columns
+
 
         # output = self.pipeline(content)[0]["generated_text"]
         # return [(output, len(output))]

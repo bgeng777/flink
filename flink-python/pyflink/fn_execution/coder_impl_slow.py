@@ -97,7 +97,17 @@ class IterableCoderImpl(LengthPrefixBaseCoderImpl):
     def encode_to_stream(self, value: List, out_stream: OutputStream):
         if value:
             for item in value:
+                print(f" debug::: {len(item)} {item}")
+                import pydevd_pycharm
+                pydevd_pycharm.settrace(
+                    'localhost',
+                    port=12345,
+                    stdout_to_server=True,
+                    stderr_to_server=True,
+                    suspend=True  # True 表示连上就停在这里
+                )
                 self._field_coder.encode_to_stream(item, self._data_out_stream)
+
                 self._write_data_to_output_stream(out_stream)
 
         # write end message
@@ -106,6 +116,7 @@ class IterableCoderImpl(LengthPrefixBaseCoderImpl):
             out_stream.write_byte(0x00)
 
     def decode_from_stream(self, in_stream: InputStream):
+        print(f"{in_stream.size()} debug::: in_stream.size()")
         while in_stream.size() > 0:
             yield self._field_coder.decode_from_stream(in_stream, in_stream.read_var_int64())
 
@@ -290,6 +301,8 @@ class ArrowCoderImpl(FieldCoderImpl):
 
         self._resettable_io.set_output_stream(out_stream)
         batch_writer = pa.RecordBatchStreamWriter(self._resettable_io, self._schema)
+        print(f"{len(cols)} debug::: {len(cols)}")
+        # raise Exception("Not implemented")
         batch_writer.write_batch(
             pandas_to_arrow(self._schema, self._timezone, self._field_types, cols))
 
