@@ -42,30 +42,35 @@ def pandas_to_arrow(schema, timezone, field_types, series):
             raise RuntimeError(error_msg % (s.dtype, t), e)
 
     arrays = []
+    if len(series) == 1 and isinstance(series[0], pd.DataFrame):
+        assert len(series[0].columns) == len(schema.names), \
+            "The number of columns in the DataFrame must be equal to the number of fields " \
+            "in the schema."
+        df: pd.DataFrame = series[0]
+        arrow_arrays = [pa.array(df[col]) for col in df.columns]
+        struct_names = [col for col in df.columns]
+        arrays.append(pa.RecordBatch.from_arrays(arrow_arrays, struct_names))
+        return pa.RecordBatch.from_arrays(arrays, schema=schema)
+
     for i in range(len(schema)):
         s = series[i]
         field_type = field_types[i]
         schema_type = schema.types[i]
         if type(s) == pd.DataFrame:
-            df : pd.DataFrame = s
-            arrays = [pa.array(df[col]) for col in df.columns]
-            print(f"df.columns { df.columns }")
-            # 2. 调用 RecordBatch.from_arrays
-            return pa.RecordBatch.from_arrays(arrays, schema=schema)
-
-
-            # array_names = [(create_array(s.iloc[j], field.type), field.name)
-            #                for j, field in enumerate(schema)]
+            # array_names = [(create_array(s[s.columns[j]], field.type), field.name)
+            #                for j, field in enumerate(schema_type)]
             # struct_arrays, struct_names = zip(*array_names)
             # arrays.append(pa.StructArray.from_arrays(struct_arrays, struct_names))
-            # # row_schema = pa.schema([
-            # #     pa.field("row", pa.struct(list(schema)))
-            # # ])
-            # return pa.RecordBatch.from_arrays(arrays, schema=schema)
+            df : pd.DataFrame = s
+            arrow_arrays = [pa.array(df[col]) for col in df.columns]
+            struct_names = [col for col in df.columns]
+            print(f"schema: {schema} df.columns { df.columns }")
+            arrays.append(pa.RecordBatch.from_arrays(arrow_arrays, struct_names))
+            # return
         else:
             arrays.append(create_array(
                 tz_convert_to_internal(s, field_type, timezone), schema_type))
-            return pa.RecordBatch.from_arrays(arrays, schema=schema)
+    return pa.RecordBatch.from_arrays(arrays, schema=schema)
 
 
 

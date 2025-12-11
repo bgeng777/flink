@@ -38,11 +38,11 @@ class HFBatchPredict(BatchPredictFunction):
         comment = data['col1']
         print(f"debug eval: {content} {comment}")
 
-        outputs = self.pipeline(content.tolist())
-        results = [
-            item[0]["generated_text"]
-            for item in outputs
-        ]
-        # results = content.tolist()
+        # outputs = self.pipeline(content.tolist())
+        # results = [
+        #     item[0]["generated_text"]
+        #     for item in outputs
+        # ]
+        results = content.tolist()
         # print(results)
-        return  pd.DataFrame(results)
+        return  pd.DataFrame({ 'c0': results, 'c1': comment})
