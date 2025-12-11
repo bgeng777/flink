@@ -87,6 +87,17 @@ class LengthPrefixBaseCoder(ABC):
             timezone = pytz.timezone(os.environ['TABLE_LOCAL_TIME_ZONE'])
             schema_proto = coder_info_descriptor_proto.arrow_type.schema
             row_type = cls._to_row_type(schema_proto)
+            # import pydevd_pycharm
+            # pydevd_pycharm.settrace(
+            #     'localhost',
+            #     port=12345,
+            #     stdout_to_server=True,
+            #     stderr_to_server=True,
+            #     suspend=True  # True 表示连上就停在这里
+            # )
+            print(f"row_type {row_type.__repr__()}")
+            print(f"_to_arrow_schema {cls._to_arrow_schema(row_type)}")
+
             return ArrowCoder(cls._to_arrow_schema(row_type), row_type, timezone)
         elif coder_info_descriptor_proto.HasField('over_window_arrow_type'):
             timezone = pytz.timezone(os.environ['TABLE_LOCAL_TIME_ZONE'])

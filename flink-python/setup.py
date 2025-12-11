@@ -278,6 +278,7 @@ try:
 
     PACKAGES = ['pyflink',
                 'pyflink.table',
+                'pyflink.table.ml',
                 'pyflink.util',
                 'pyflink.datastream',
                 'pyflink.datastream.connectors',

@@ -47,14 +47,26 @@ def pandas_to_arrow(schema, timezone, field_types, series):
         field_type = field_types[i]
         schema_type = schema.types[i]
         if type(s) == pd.DataFrame:
-            array_names = [(create_array(s[s.columns[j]], field.type), field.name)
-                           for j, field in enumerate(schema_type)]
-            struct_arrays, struct_names = zip(*array_names)
-            arrays.append(pa.StructArray.from_arrays(struct_arrays, struct_names))
+            df : pd.DataFrame = s
+            arrays = [pa.array(df[col]) for col in df.columns]
+            print(f"df.columns { df.columns }")
+            # 2. 调用 RecordBatch.from_arrays
+            return pa.RecordBatch.from_arrays(arrays, schema=schema)
+
+
+            # array_names = [(create_array(s.iloc[j], field.type), field.name)
+            #                for j, field in enumerate(schema)]
+            # struct_arrays, struct_names = zip(*array_names)
+            # arrays.append(pa.StructArray.from_arrays(struct_arrays, struct_names))
+            # # row_schema = pa.schema([
+            # #     pa.field("row", pa.struct(list(schema)))
+            # # ])
+            # return pa.RecordBatch.from_arrays(arrays, schema=schema)
         else:
             arrays.append(create_array(
                 tz_convert_to_internal(s, field_type, timezone), schema_type))
-    return pa.RecordBatch.from_arrays(arrays, schema=schema)
+            return pa.RecordBatch.from_arrays(arrays, schema=schema)
+
 
 
 @Internal()

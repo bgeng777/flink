@@ -379,7 +379,7 @@ public class StreamExecMLPredictTableFunction extends ExecNodeBase<RowData>
             if (isInProcessMode) {
                 Class<?> clazz =
                         CommonPythonUtil.loadClass(
-                                "org.apache.flink.table.runtime.operators.python.table.arrow.ArrowPythonTableFunctionOperator", classLoader);
+                                "org.apache.flink.table.runtime.operators.python.table.arrow.ArrowPythonPredictFunctionOperator", classLoader);
                 //                                PYTHON_TABLE_FUNCTION_OPERATOR_NAME, classLoader);
                 Constructor<?> ctor =
                         clazz.getConstructor(

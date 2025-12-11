@@ -1,4 +1,6 @@
 from typing import List
+import pandas as pd
+from pandas import Series
 
 from pyflink.common.types import Row
 
@@ -20,6 +22,23 @@ class PredictFunction(TableFunction):
         :param data: The input data for prediction.
         :return: A list of rows containing the prediction results.
         """
+        raise NotImplementedError
+
+
+    @classmethod
+    def create_udtf(cls):
+        return udtf(cls())
+
+
+class BatchPredictFunction(TableFunction):
+
+    def eval(self, *args):
+        data = pd.DataFrame(
+            {f"col{i}": col for i, col in enumerate(args)}
+        )
+        return self.predict(data)
+
+    def predict(self, data: pd.DataFrame) -> pd.DataFrame:
         raise NotImplementedError
 
 

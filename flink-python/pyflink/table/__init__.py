@@ -135,7 +135,7 @@ from pyflink.table.table_schema import TableSchema
 from pyflink.table.types import DataTypes, UserDefinedType, Row, RowKind
 from pyflink.table.udf import FunctionContext, ScalarFunction, TableFunction, AggregateFunction, \
     TableAggregateFunction
-
+from pyflink.table import ml
 __all__ = [
     'TableEnvironment',
     'StreamTableEnvironment',
@@ -173,5 +173,6 @@ __all__ = [
     'ResultKind',
     'CompiledPlan',
     'PlanReference',
-    'TablePipeline'
+    'TablePipeline',
+    'ml'
 ]

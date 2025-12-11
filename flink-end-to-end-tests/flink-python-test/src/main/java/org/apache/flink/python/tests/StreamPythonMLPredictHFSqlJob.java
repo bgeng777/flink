@@ -39,7 +39,7 @@ public class StreamPythonMLPredictHFSqlJob {
         Configuration config = tEnv.getConfig().getConfiguration();
         String pythonInterpreterPath = "/Users/kenken/opensource/py312/bin/python";
         String pythonFilesPath =
-                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/huggingface_udtf.py";
+                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/hf_batch_udtf.py";
         config.setString("python.files", "file://" + pythonFilesPath);
         config.setString("python.executable", pythonInterpreterPath);
         config.setString("python.client.executable", pythonInterpreterPath);
@@ -62,7 +62,7 @@ public class StreamPythonMLPredictHFSqlJob {
                         + "WITH (\n"
                         + "   'provider' = 'generic-python',\n"
                         + "   'model' = '/Users/kenken/.cache/modelscope/hub/models/Qwen/Qwen3-0.6B',\n"
-                        + "   'python-predict-class' = 'huggingface_udtf.HuggingFaceModelUDTF',\n"
+                        + "   'python-predict-class' = 'hf_batch_udtf.HFBatchPredict',\n"
                         + "   'properties.device_map' = 'auto'\n"
                         + ")");
         List<Row> result =

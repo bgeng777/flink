@@ -24,7 +24,6 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.fnexecution.v1.FlinkFnApi;
 import org.apache.flink.python.util.ProtoUtils;
-import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.data.utils.JoinedRowData;
@@ -47,12 +46,10 @@ import static org.apache.flink.python.PythonOptions.MAX_ARROW_BATCH_SIZE;
 import static org.apache.flink.python.PythonOptions.PYTHON_METRIC_ENABLED;
 import static org.apache.flink.python.PythonOptions.PYTHON_PROFILE_ENABLED;
 import static org.apache.flink.python.util.ProtoUtils.createArrowTypeCoderInfoDescriptorProto;
-import static org.apache.flink.python.util.ProtoUtils.createFlattenRowTypeCoderInfoDescriptorProto;
-import static org.apache.flink.python.util.ProtoUtils.createRowTypeCoderInfoDescriptorProto;
 
 /** The Python {@link TableFunction} operator. */
 @Internal
-public class ArrowPythonTableFunctionOperator
+public class ArrowPythonPredictFunctionOperator
         extends AbstractStatelessFunctionOperator<RowData, RowData, RowData> {
 
     private static final long serialVersionUID = 1L;
@@ -61,9 +58,6 @@ public class ArrowPythonTableFunctionOperator
 
     /** The Python {@link TableFunction} to be executed. */
     private final PythonFunctionInfo tableFunction;
-
-    /** The correlate join type. */
-    private final FlinkJoinType joinType;
 
     private final GeneratedProjection udtfInputGeneratedProjection;
 
@@ -76,24 +70,8 @@ public class ArrowPythonTableFunctionOperator
     /** The Projection which projects the udtf input fields from the input row. */
     private transient Projection<RowData, BinaryRowData> udtfInputProjection;
 
-    /** The TypeSerializer for udtf execution results. */
-    private transient TypeSerializer<RowData> udtfOutputTypeSerializer;
-
-    /** The TypeSerializer for udtf input elements. */
-    private transient TypeSerializer<RowData> udtfInputTypeSerializer;
-
     /** The type serializer for the forwarded fields. */
     private transient RowDataSerializer forwardedInputSerializer;
-
-    /** The current input element which has not been received all python udtf results. */
-    private transient RowData input;
-
-    /** Whether the current input element has joined parts of python udtf results. */
-    private transient boolean hasJoined;
-
-    /** Whether the current received data is the finished result of the current input element. */
-    private transient boolean isFinishResult;
-
 
     /** The current number of elements to be included in an arrow batch. */
     private transient int currentBatchCount;
@@ -104,7 +82,7 @@ public class ArrowPythonTableFunctionOperator
     private transient ArrowSerializer arrowSerializer;
 
 
-    public ArrowPythonTableFunctionOperator(
+    public ArrowPythonPredictFunctionOperator(
             Configuration config,
             PythonFunctionInfo tableFunction,
             RowType inputType,
@@ -114,10 +92,6 @@ public class ArrowPythonTableFunctionOperator
             GeneratedProjection udtfInputGeneratedProjection) {
         super(config, inputType, udfInputType, udfOutputType);
         this.tableFunction = Preconditions.checkNotNull(tableFunction);
-        Preconditions.checkArgument(
-                joinType == FlinkJoinType.INNER || joinType == FlinkJoinType.LEFT,
-                "The join type should be inner join or left join");
-        this.joinType = joinType;
         this.udtfInputGeneratedProjection =
                 Preconditions.checkNotNull(udtfInputGeneratedProjection);
     }
@@ -133,11 +107,6 @@ public class ArrowPythonTableFunctionOperator
                 udtfInputGeneratedProjection.newInstance(
                         Thread.currentThread().getContextClassLoader());
         forwardedInputSerializer = new RowDataSerializer(inputType);
-        udtfInputTypeSerializer = PythonTypeUtils.toInternalSerializer(udfInputType);
-        udtfOutputTypeSerializer = PythonTypeUtils.toInternalSerializer(udfOutputType);
-        input = null;
-        hasJoined = false;
-        isFinishResult = false;
 
         maxArrowBatchSize = Math.min(config.get(MAX_ARROW_BATCH_SIZE), maxBundleSize);
         arrowSerializer = new ArrowSerializer(udfInputType, udfOutputType);
@@ -162,14 +131,14 @@ public class ArrowPythonTableFunctionOperator
                     "The Python TableFunction Operator does not support row-based operations.");
         } else {
             return createArrowTypeCoderInfoDescriptorProto(
-                    runnerInputType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, true);
+                    runnerInputType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, false);
         }
     }
 
     @Override
     public FlinkFnApi.CoderInfoDescriptor createOutputCoderInfoDescriptor(RowType runnerOutType) {
         return createArrowTypeCoderInfoDescriptorProto(
-                runnerOutType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, true);
+                runnerOutType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, false);
     }
 
     @Override
@@ -256,53 +225,15 @@ public class ArrowPythonTableFunctionOperator
     @Override
     @SuppressWarnings("ConstantConditions")
     public void emitResult(Tuple3<String, byte[], Integer> resultTuple) throws Exception {
-//        byte[] rawUdtfResult;
-//        if (isFinishResult) {
-//            input = forwardedInputQueue.poll();
-//            hasJoined = false;
-//        }
-        if (!isFinishResult) {
-            byte[] udfResult = resultTuple.f1;
-            int length = resultTuple.f2;
-            bais.setBuffer(udfResult, 0, length);
-            int rowCount = arrowSerializer.load();
-            if (rowCount  > 0) {
-                System.out.println("rowCount: " + rowCount);
-                for (int i = 0; i < rowCount; i++) {
-                    RowData input = forwardedInputQueue.poll();
-                    reuseJoinedRow.setRowKind(input.getRowKind());
-                    rowDataWrapper.collect(reuseJoinedRow.replace(input, arrowSerializer.read(i)));
-                }
-            }
-            isFinishResult = true;
-
-            arrowSerializer.resetReader();
+        byte[] udfResult = resultTuple.f1;
+        int length = resultTuple.f2;
+        bais.setBuffer(udfResult, 0, length);
+        int rowCount = arrowSerializer.load();
+        for (int i = 0; i < rowCount; i++) {
+            RowData input = forwardedInputQueue.poll();
+            reuseJoinedRow.setRowKind(input.getRowKind());
+            rowDataWrapper.collect(reuseJoinedRow.replace(input, arrowSerializer.read(i)));
         }
-
-
-//        do {
-//            rawUdtfResult = resultTuple.f1;
-//            length = resultTuple.f2;
-//            isFinishResult = isFinishResult(rawUdtfResult, length);
-//            if (!isFinishResult) {
-//                reuseJoinedRow.setRowKind(input.getRowKind());
-//                bais.setBuffer(rawUdtfResult, 0, rawUdtfResult.length);
-//                RowData udtfResult = udtfOutputTypeSerializer.deserialize(baisWrapper);
-//                rowDataWrapper.collect(reuseJoinedRow.replace(input, udtfResult));
-//                resultTuple = pythonFunctionRunner.pollResult();
-//                hasJoined = true;
-//            } else if (joinType == FlinkJoinType.LEFT && !hasJoined) {
-//                GenericRowData udtfResult = new GenericRowData(udfOutputType.getFieldCount());
-//                for (int i = 0; i < udtfResult.getArity(); i++) {
-//                    udtfResult.setField(i, null);
-//                }
-//                rowDataWrapper.collect(reuseJoinedRow.replace(input, udtfResult));
-//            }
-//        } while (!isFinishResult && resultTuple != null);
-    }
-
-    /** The received udtf execution result is a finish message when it is a byte with value 0x00. */
-    private boolean isFinishResult(byte[] rawUdtfResult, int length) {
-        return length == 1 && rawUdtfResult[0] == 0x00;
+        arrowSerializer.resetReader();
     }
 }

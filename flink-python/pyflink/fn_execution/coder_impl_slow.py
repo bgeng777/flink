@@ -98,14 +98,14 @@ class IterableCoderImpl(LengthPrefixBaseCoderImpl):
         if value:
             for item in value:
                 print(f" debug::: {len(item)} {item}")
-                import pydevd_pycharm
-                pydevd_pycharm.settrace(
-                    'localhost',
-                    port=12345,
-                    stdout_to_server=True,
-                    stderr_to_server=True,
-                    suspend=True  # True 表示连上就停在这里
-                )
+                # import pydevd_pycharm
+                # pydevd_pycharm.settrace(
+                #     'localhost',
+                #     port=12345,
+                #     stdout_to_server=True,
+                #     stderr_to_server=True,
+                #     suspend=True  # True 表示连上就停在这里
+                # )
                 self._field_coder.encode_to_stream(item, self._data_out_stream)
 
                 self._write_data_to_output_stream(out_stream)

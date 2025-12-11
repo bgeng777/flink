@@ -1,3 +1,4 @@
-from pyflink.table.ml.predict import PredictFunction
+from pyflink.table.ml.predict import PredictFunction, BatchPredictFunction
 
-__all__ = ['PredictFunction']
+__all__ = ['PredictFunction',
+           'BatchPredictFunction']
