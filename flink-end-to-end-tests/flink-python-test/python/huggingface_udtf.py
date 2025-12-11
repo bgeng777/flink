@@ -3,11 +3,11 @@ import logging
 import pandas as pd
 
 from pandas import Series
-from pyflink.table.udf import TableFunction, udtf
+from pyflink.table.ml import PredictFunction
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 
-class HuggingFaceFunc(TableFunction):
+class HuggingFaceFunc(PredictFunction):
     def __init__(self):
         self.model = None
         self.tokenizer = None
@@ -30,21 +30,22 @@ class HuggingFaceFunc(TableFunction):
         )
         assert self.model is not None
 
-    # def eval(self, content: str, comment: str):
+    def eval(self, content: str, comment: str):
+        # print(f"debug eval: {content} {comment}")
+
+        output = self.pipeline(content)[0]["generated_text"]
+        yield output, comment
+
+    # def predict(self, content: Series, comment: Series):
     #     print(f"debug eval: {content} {comment}")
     #
-    #     output = self.pipeline(content)[0]["generated_text"]
-    #     return [(output, len(output))]
-    def eval(self, content: Series, comment: Series):
-        print(f"debug eval: {content} {comment}")
-
-        outputs = self.pipeline(content.tolist())
-        results = [
-            item[0]["generated_text"]
-            for item in outputs
-        ]
-        print(results)
-        return  pd.Series(results)
+    #     outputs = self.pipeline(content.tolist())
+    #     results = [
+    #         item[0]["generated_text"]
+    #         for item in outputs
+    #     ]
+    #     print(results)
+        # return  pd.Series(results)
         # return List[str]
         # return [Series(Series()),  Series(Series())]
         # return pd.DataFrame(pd.Series(results), pd.Series(results))
@@ -56,4 +57,3 @@ class HuggingFaceFunc(TableFunction):
 
 
 
-HuggingFaceModelUDTF = udtf(HuggingFaceFunc())

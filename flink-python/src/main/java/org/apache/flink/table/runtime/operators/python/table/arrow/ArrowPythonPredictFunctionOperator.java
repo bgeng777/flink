@@ -46,6 +46,8 @@ import static org.apache.flink.python.PythonOptions.MAX_ARROW_BATCH_SIZE;
 import static org.apache.flink.python.PythonOptions.PYTHON_METRIC_ENABLED;
 import static org.apache.flink.python.PythonOptions.PYTHON_PROFILE_ENABLED;
 import static org.apache.flink.python.util.ProtoUtils.createArrowTypeCoderInfoDescriptorProto;
+import static org.apache.flink.python.util.ProtoUtils.createFlattenRowTypeCoderInfoDescriptorProto;
+import static org.apache.flink.python.util.ProtoUtils.createRowTypeCoderInfoDescriptorProto;
 
 /** The Python {@link TableFunction} operator. */
 @Internal
@@ -80,7 +82,7 @@ public class ArrowPythonPredictFunctionOperator
     private transient int maxArrowBatchSize;
 
     private transient ArrowSerializer arrowSerializer;
-
+    protected final RowType wrapped;
 
     public ArrowPythonPredictFunctionOperator(
             Configuration config,
@@ -94,6 +96,11 @@ public class ArrowPythonPredictFunctionOperator
         this.tableFunction = Preconditions.checkNotNull(tableFunction);
         this.udtfInputGeneratedProjection =
                 Preconditions.checkNotNull(udtfInputGeneratedProjection);
+        this.wrapped = new RowType(
+                java.util.Collections.singletonList(
+                        new RowType.RowField("wrapped", udfOutputType)  // 一列，类型就是原来的 RowType
+                )
+        );
     }
 
     @Override
@@ -109,7 +116,7 @@ public class ArrowPythonPredictFunctionOperator
         forwardedInputSerializer = new RowDataSerializer(inputType);
 
         maxArrowBatchSize = Math.min(config.get(MAX_ARROW_BATCH_SIZE), maxBundleSize);
-        arrowSerializer = new ArrowSerializer(udfInputType, udfOutputType);
+        arrowSerializer = new ArrowSerializer(udfInputType, wrapped);
         arrowSerializer.open(bais, baos);
         currentBatchCount = 0;
     }
@@ -133,12 +140,25 @@ public class ArrowPythonPredictFunctionOperator
             return createArrowTypeCoderInfoDescriptorProto(
                     runnerInputType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, false);
         }
+//        if (tableFunction.getPythonFunction().takesRowAsInput()) {
+//            // need the field names in case of row-based operations
+//            return createRowTypeCoderInfoDescriptorProto(
+//                    runnerInputType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, true);
+//        } else {
+//            return createFlattenRowTypeCoderInfoDescriptorProto(
+//                    runnerInputType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, true);
+//        }
     }
 
     @Override
     public FlinkFnApi.CoderInfoDescriptor createOutputCoderInfoDescriptor(RowType runnerOutType) {
+        RowType wrapped =  new RowType(
+                java.util.Collections.singletonList(
+                        new RowType.RowField("wrapped", runnerOutType)  // 一列，类型就是原来的 RowType
+                )
+        );
         return createArrowTypeCoderInfoDescriptorProto(
-                runnerOutType, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, false);
+                wrapped, FlinkFnApi.CoderInfoDescriptor.Mode.MULTIPLE, false);
     }
 
     @Override
@@ -232,7 +252,9 @@ public class ArrowPythonPredictFunctionOperator
         for (int i = 0; i < rowCount; i++) {
             RowData input = forwardedInputQueue.poll();
             reuseJoinedRow.setRowKind(input.getRowKind());
-            rowDataWrapper.collect(reuseJoinedRow.replace(input, arrowSerializer.read(i)));
+            RowData wrappedData = arrowSerializer.read(i);
+            RowData originalRow = wrappedData.getRow(0, udfOutputType.getFieldCount());
+            rowDataWrapper.collect(reuseJoinedRow.replace(input, originalRow));
         }
         arrowSerializer.resetReader();
     }

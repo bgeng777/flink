@@ -33,6 +33,16 @@ class PredictFunction(TableFunction):
 class BatchPredictFunction(TableFunction):
 
     def eval(self, *args):
+        # import pydevd_pycharm
+        # pydevd_pycharm.settrace(
+        #     'localhost',
+        #     port=12345,
+        #     stdout_to_server=True,
+        #     stderr_to_server=True,
+        #     suspend=True  # True 表示连上就停在这里
+        # )
+        print("BatchPredictFunction")
+        print(args)
         data = pd.DataFrame(
             {f"col{i}": col for i, col in enumerate(args)}
         )

@@ -331,61 +331,61 @@ class PandasUDFITTests(object):
              "[1, 2], [hello, 中文, null], +I[1, hello, 1970-01-02T00:00:00.123, [1, 2]], "
              "{1=hello, 2=world}, [102, 108, 105, 110, 107]]"])
 
-    # def test_invalid_pandas_udf(self):
-    #
-    #     @udf(result_type=DataTypes.INT(), func_type="pandas")
-    #     def length_mismatch(i):
-    #         return i[1:]
-    #
-    #     @udf(result_type=DataTypes.INT(), func_type="pandas")
-    #     def result_type_not_series(i):
-    #         return i.iloc[0]
-    #
-    #     t = self.t_env.from_elements([(1, 2, 3), (2, 5, 6), (3, 1, 9)], ['a', 'b', 'c'])
-    #
-    #     msg = "The result length '0' of Pandas UDF 'length_mismatch' is not equal " \
-    #           "to the input length '1'"
-    #     from py4j.protocol import Py4JJavaError
-    #     with self.assertRaisesRegex(Py4JJavaError, expected_regex=msg):
-    #         t.select(length_mismatch(t.a)).to_pandas()
-    #
-    #     msg = "The result type of Pandas UDF 'result_type_not_series' must be pandas.Series or " \
-    #           "pandas.DataFrame, got <class 'numpy.int64'>"
-    #     from py4j.protocol import Py4JJavaError
-    #     with self.assertRaisesRegex(Py4JJavaError, expected_regex=msg):
-    #         t.select(result_type_not_series(t.a)).to_pandas()
-    #
-    # def test_data_types(self):
-    #     import pandas as pd
-    #
-    #     timezone = self.t_env.get_config().get_local_timezone()
-    #     local_datetime = pytz.timezone(timezone).localize(
-    #         datetime.datetime(1970, 1, 2, 0, 0, 0, 123000))
-    #
-    #     @udf(result_type=DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3), func_type="pandas")
-    #     def local_zoned_timestamp_func(local_zoned_timestamp_param):
-    #         assert isinstance(local_zoned_timestamp_param, pd.Series)
-    #         assert isinstance(local_zoned_timestamp_param[0], datetime.datetime), \
-    #             'local_zoned_timestamp_param of wrong type %s !' % type(
-    #                 local_zoned_timestamp_param[0])
-    #         assert local_zoned_timestamp_param[0] == local_datetime, \
-    #             'local_zoned_timestamp_param is wrong value %s, %s!' % \
-    #             (local_zoned_timestamp_param[0], local_datetime)
-    #         return local_zoned_timestamp_param
-    #
-    #     sink_table_ddl = """
-    #     CREATE TABLE Results_test_data_types(a TIMESTAMP_LTZ(3)) WITH ('connector'='test-sink')
-    #     """
-    #     self.t_env.execute_sql(sink_table_ddl)
-    #
-    #     t = self.t_env.from_elements(
-    #         [(local_datetime,)],
-    #         DataTypes.ROW([DataTypes.FIELD("a", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))]))
-    #
-    #     t.select(local_zoned_timestamp_func(local_zoned_timestamp_func(t.a))) \
-    #         .execute_insert("Results_test_data_types").wait()
-    #     actual = source_sink_utils.results()
-    #     self.assert_equals(actual, ["+I[1970-01-02T00:00:00.123Z]"])
+    def test_invalid_pandas_udf(self):
+
+        @udf(result_type=DataTypes.INT(), func_type="pandas")
+        def length_mismatch(i):
+            return i[1:]
+
+        @udf(result_type=DataTypes.INT(), func_type="pandas")
+        def result_type_not_series(i):
+            return i.iloc[0]
+
+        t = self.t_env.from_elements([(1, 2, 3), (2, 5, 6), (3, 1, 9)], ['a', 'b', 'c'])
+
+        msg = "The result length '0' of Pandas UDF 'length_mismatch' is not equal " \
+              "to the input length '1'"
+        from py4j.protocol import Py4JJavaError
+        with self.assertRaisesRegex(Py4JJavaError, expected_regex=msg):
+            t.select(length_mismatch(t.a)).to_pandas()
+
+        msg = "The result type of Pandas UDF 'result_type_not_series' must be pandas.Series or " \
+              "pandas.DataFrame, got <class 'numpy.int64'>"
+        from py4j.protocol import Py4JJavaError
+        with self.assertRaisesRegex(Py4JJavaError, expected_regex=msg):
+            t.select(result_type_not_series(t.a)).to_pandas()
+
+    def test_data_types(self):
+        import pandas as pd
+
+        timezone = self.t_env.get_config().get_local_timezone()
+        local_datetime = pytz.timezone(timezone).localize(
+            datetime.datetime(1970, 1, 2, 0, 0, 0, 123000))
+
+        @udf(result_type=DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3), func_type="pandas")
+        def local_zoned_timestamp_func(local_zoned_timestamp_param):
+            assert isinstance(local_zoned_timestamp_param, pd.Series)
+            assert isinstance(local_zoned_timestamp_param[0], datetime.datetime), \
+                'local_zoned_timestamp_param of wrong type %s !' % type(
+                    local_zoned_timestamp_param[0])
+            assert local_zoned_timestamp_param[0] == local_datetime, \
+                'local_zoned_timestamp_param is wrong value %s, %s!' % \
+                (local_zoned_timestamp_param[0], local_datetime)
+            return local_zoned_timestamp_param
+
+        sink_table_ddl = """
+        CREATE TABLE Results_test_data_types(a TIMESTAMP_LTZ(3)) WITH ('connector'='test-sink')
+        """
+        self.t_env.execute_sql(sink_table_ddl)
+
+        t = self.t_env.from_elements(
+            [(local_datetime,)],
+            DataTypes.ROW([DataTypes.FIELD("a", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))]))
+
+        t.select(local_zoned_timestamp_func(local_zoned_timestamp_func(t.a))) \
+            .execute_insert("Results_test_data_types").wait()
+        actual = source_sink_utils.results()
+        self.assert_equals(actual, ["+I[1970-01-02T00:00:00.123Z]"])
 
 
 class BatchPandasUDFITTests(PandasUDFITTests,

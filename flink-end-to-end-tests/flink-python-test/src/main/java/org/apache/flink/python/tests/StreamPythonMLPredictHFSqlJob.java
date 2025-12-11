@@ -31,6 +31,8 @@ import static org.apache.flink.table.api.Expressions.row;
 /** A simple job used to test submitting the Python ML Predict job using Hugging Face. */
 public class StreamPythonMLPredictHFSqlJob {
 
+    // batch: 92918
+    // single: 89000
     public static void main(String[] args) {
         long startTime = System.currentTimeMillis();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -39,7 +41,8 @@ public class StreamPythonMLPredictHFSqlJob {
         Configuration config = tEnv.getConfig().getConfiguration();
         String pythonInterpreterPath = "/Users/kenken/opensource/py312/bin/python";
         String pythonFilesPath =
-                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/hf_batch_udtf.py";
+//                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/hf_batch_udtf.py";
+                "/Users/kenken/opensource/flink/flink-end-to-end-tests/flink-python-test/python/huggingface_udtf.py";
         config.setString("python.files", "file://" + pythonFilesPath);
         config.setString("python.executable", pythonInterpreterPath);
         config.setString("python.client.executable", pythonInterpreterPath);
@@ -53,6 +56,13 @@ public class StreamPythonMLPredictHFSqlJob {
                                         DataTypes.FIELD("request_id", DataTypes.INT())),
                                 row("tell me a joke", "first row", 5),
                                 row("what is pyflink", "second row", 5),
+                                row("what is vllm", "third row", 9),
+                                row("tell me a joke", "first row", 5),
+                                row("what is pyflink", "second row", 5),
+                                row("what is vllm", "third row", 9),
+                                row("tell me a joke", "first row", 5),
+                                row("what is pyflink", "second row", 5),
+                                row("what is vllm", "third row", 9),
                                 row("what is vllm", "third row", 9))
                         .as("prompt", "prompt_comment", "request_id"));
         tEnv.executeSql(
@@ -62,7 +72,8 @@ public class StreamPythonMLPredictHFSqlJob {
                         + "WITH (\n"
                         + "   'provider' = 'generic-python',\n"
                         + "   'model' = '/Users/kenken/.cache/modelscope/hub/models/Qwen/Qwen3-0.6B',\n"
-                        + "   'python-predict-class' = 'hf_batch_udtf.HFBatchPredict',\n"
+//                        + "   'python-predict-class' = 'hf_batch_udtf.HFBatchPredict',\n"
+                        + "   'python-predict-class' = 'huggingface_udtf.HuggingFaceFunc',\n"
                         + "   'properties.device_map' = 'auto'\n"
                         + ")");
         List<Row> result =

@@ -30,7 +30,8 @@ import static org.apache.flink.table.api.Expressions.row;
 
 /** A simple job used to test submitting the Python ML Predict job using vLLM. */
 public class StreamPythonMLPredictVLLMSqlJob {
-
+// single: 93941
+//    batch: 65039
     public static void main(String[] args) {
         long startTime = System.currentTimeMillis();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -53,6 +54,13 @@ public class StreamPythonMLPredictVLLMSqlJob {
                                         DataTypes.FIELD("request_id", DataTypes.INT())),
                                 row("tell me a joke", "first row", 5),
                                 row("what is pyflink", "second row", 5),
+                                row("what is vllm", "third row", 9),
+                                row("tell me a joke", "first row", 5),
+                                row("what is pyflink", "second row", 5),
+                                row("what is vllm", "third row", 9),
+                                row("tell me a joke", "first row", 5),
+                                row("what is pyflink", "second row", 5),
+                                row("what is vllm", "third row", 9),
                                 row("what is vllm", "third row", 9))
                         .as("prompt", "prompt_comment", "request_id"));
         tEnv.executeSql(
@@ -63,7 +71,7 @@ public class StreamPythonMLPredictVLLMSqlJob {
                         + "WITH (\n"
                         + "   'provider' = 'generic-python',\n"
                         + "   'model' = '/Users/kenken/.cache/modelscope/hub/models/Qwen/Qwen3-0.6B',\n"
-                        + "   'python-predict-class' = 'vllm_args_udtf.VLLMMLUDTF',\n"
+                        + "   'python-predict-class' = 'vllm_args_udtf.VLLMFunc',\n"
                         + "   'properties.vllm.engine_args' = '--max-model-len 256 --trust-remote-code True --dtype half --enforce-eager True',\n"
                         + "   'properties.vllm.sampling_params' = '{\"temperature\" : 0.7, \"top_p\" : 0.9, \"max_tokens\" : 256 }'\n"
                         + ")");
