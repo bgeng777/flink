@@ -30,8 +30,8 @@ import static org.apache.flink.table.api.Expressions.row;
 
 /** A simple job used to test submitting the Python ML Predict job using vLLM. */
 public class StreamPythonMLPredictVLLMSqlJob {
-// single: 93941
-//    batch: 65039
+    // single: 93941 - 20000 = 73941
+    // batch: 65039 - 20000 = 45039
     public static void main(String[] args) {
         long startTime = System.currentTimeMillis();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();

@@ -172,36 +172,11 @@ class VLLMBatchFunc(BatchPredictFunction):
 
 
     def predict(self, data: pd.DataFrame):
-
-        # print(f"debug data: {data} ")
         content =  data['col0']
         comment = data['col1']
-        # print(f"debug eval: {content} {comment}")
-        #
-        # outputs = self.pipeline(content.tolist())
-        # results = [
-        #     item[0]["generated_text"]
-        #     for item in outputs
-        # ]
-        #
-
-        # results = content.tolist()
-        # print(results)
-        # return  pd.DataFrame({ 'c0': results, 'c1': comment})
-
-        # logging.info(f"eval promt: {prompt}")
-        # print(f"eval promt: {prompt}")
-        # if prompt:
-        # if self.model:
         outputs = self.model.generate(content.tolist(), self.sampling_params)
         results = [
             output.outputs[0].text
             for output in outputs
         ]
         return  pd.DataFrame({ 'c0': results, 'c1': 10 * len(results)})
-            # generated_text = outputs[0].outputs[0].text
-            # print(f"Generated text: {generated_text}")
-            # return [generated_text, len(generated_text)]
-        # else:
-        #     return ["no model specified", 0]
-

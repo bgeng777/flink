@@ -152,7 +152,7 @@ public class ArrowPythonPredictFunctionOperator
 
     @Override
     public FlinkFnApi.CoderInfoDescriptor createOutputCoderInfoDescriptor(RowType runnerOutType) {
-        RowType wrapped =  new RowType(
+        RowType wrapped = new RowType(
                 java.util.Collections.singletonList(
                         new RowType.RowField("wrapped", runnerOutType)  // 一列，类型就是原来的 RowType
                 )
