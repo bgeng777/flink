@@ -20,10 +20,13 @@ package org.apache.flink.python.env.embedded;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.JobID;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.python.env.AbstractPythonEnvironmentManager;
 import org.apache.flink.python.env.PythonDependencyInfo;
 import org.apache.flink.python.env.PythonEnvironment;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import pemja.core.PythonInterpreterConfig;
 
 import java.io.File;
@@ -36,6 +39,8 @@ import java.util.Map;
  */
 @Internal
 public class EmbeddedPythonEnvironmentManager extends AbstractPythonEnvironmentManager {
+    private static final Logger LOG =
+            LoggerFactory.getLogger(EmbeddedPythonEnvironmentManager.class);
 
     public EmbeddedPythonEnvironmentManager(
             PythonDependencyInfo dependencyInfo,
@@ -70,13 +75,36 @@ public class EmbeddedPythonEnvironmentManager extends AbstractPythonEnvironmentM
                     flinkPython + File.pathSeparator + env.getOrDefault("PYTHONPATH", ""));
         }
 
-        PythonInterpreterConfig interpreterConfig =
+        PythonInterpreterConfig.PythonInterpreterConfigBuilder interpreterConfigBuilder =
                 PythonInterpreterConfig.newBuilder()
-                        .setPythonExec(dependencyInfo.getPythonExec())
                         .setExcType(execType)
-                        .addPythonPaths(env.getOrDefault("PYTHONPATH", ""))
-                        .build();
-
-        return new EmbeddedPythonEnvironment(interpreterConfig, env);
+                        .addPythonPaths(env.getOrDefault("PYTHONPATH", ""));
+        if (dependencyInfo.isPythonExecFromArchives()) {
+            String pythonHome =
+                    String.join(
+                            Path.SEPARATOR,
+                            env.get(PYTHON_WORKING_DIR),
+                            dependencyInfo
+                                    .getPythonExec()
+                                    .substring(
+                                            0, dependencyInfo.getPythonExec().lastIndexOf("bin")));
+            String pythonExec =
+                    String.join(
+                            Path.SEPARATOR,
+                            env.get(PYTHON_WORKING_DIR),
+                            dependencyInfo.getPythonExec());
+            LOG.info(
+                    "Use python home and python exec from archives. Python home: {}, Python exec: {}",
+                    pythonHome,
+                    pythonExec);
+            interpreterConfigBuilder.setPythonHome(pythonHome).setPythonExec(pythonExec);
+        } else {
+            LOG.info(
+                    "Python interpreter path is not from archives, use python exec from "
+                            + "config {}.",
+                    dependencyInfo.getPythonExec());
+            interpreterConfigBuilder.setPythonExec(dependencyInfo.getPythonExec());
+        }
+        return new EmbeddedPythonEnvironment(interpreterConfigBuilder.build(), env);
     }
 }

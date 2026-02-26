@@ -21,6 +21,7 @@ package org.apache.flink.python.env;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.cache.DistributedCache;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.python.util.PythonDependencyUtils;
 
 import javax.annotation.Nonnull;
@@ -39,6 +40,7 @@ import static org.apache.flink.python.PythonOptions.PYTHON_EXECUTION_MODE;
 import static org.apache.flink.python.PythonOptions.PYTHON_FILES_DISTRIBUTED_CACHE_INFO;
 import static org.apache.flink.python.PythonOptions.PYTHON_PATH;
 import static org.apache.flink.python.PythonOptions.PYTHON_REQUIREMENTS_FILE_DISTRIBUTED_CACHE_INFO;
+import static org.apache.flink.python.util.PythonDependencyUtils.PARAM_DELIMITER;
 
 /** PythonDependencyInfo contains the information of third-party dependencies. */
 @Internal
@@ -202,5 +204,26 @@ public final class PythonDependencyInfo {
                 pythonExec,
                 config.get(PYTHON_EXECUTION_MODE),
                 config.get(PYTHON_PATH));
+    }
+
+    public boolean isPythonExecFromArchives() {
+        int index = pythonExec.indexOf(Path.SEPARATOR);
+        if (index == -1) {
+            index = pythonExec.length();
+        }
+        String pythonExecBaseDir = pythonExec.substring(0, index);
+        for (Map.Entry<String, String> entry : archives.entrySet()) {
+            String targetDirName;
+            if (entry.getValue().contains(PARAM_DELIMITER)) {
+                String[] filePathAndTargetDir = entry.getValue().split(PARAM_DELIMITER, 2);
+                targetDirName = filePathAndTargetDir[1];
+            } else {
+                targetDirName = entry.getValue();
+            }
+            if (targetDirName.equals(pythonExecBaseDir)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
