@@ -72,6 +72,41 @@ public class PythonOptions {
                             "When it is false, metric for Python will be disabled. You can "
                                     + "disable the metric to achieve better performance at some circumstance.");
 
+    /**
+     * Record one Memray window per standalone worker start. Requires rest.profiling.enabled and
+     * Memray in the worker environment. Files use rest.profiling.dir; startup files are not part of
+     * REST history and deployment operators manage retention.
+     */
+    public static final ConfigOption<Boolean> PYTHON_MEMORY_STARTUP_ENABLED =
+            ConfigOptions.key("python.memory-profiling.startup.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Record one Memray window per standalone worker start. Requires rest.profiling.enabled and Memray in the worker environment. Files use rest.profiling.dir; startup files are not part of REST history and deployment operators manage retention.");
+
+    /** Delay before startup memory capture. Must be non-negative. */
+    public static final ConfigOption<java.time.Duration> PYTHON_MEMORY_STARTUP_DELAY =
+            ConfigOptions.key("python.memory-profiling.startup.delay")
+                    .durationType()
+                    .defaultValue(java.time.Duration.ZERO)
+                    .withDescription("Delay before startup memory capture. Must be non-negative.");
+
+    /** Startup memory capture duration. Must be positive and within rest.profiling.duration-max. */
+    public static final ConfigOption<java.time.Duration> PYTHON_MEMORY_STARTUP_DURATION =
+            ConfigOptions.key("python.memory-profiling.startup.duration")
+                    .durationType()
+                    .defaultValue(java.time.Duration.ofSeconds(60))
+                    .withDescription(
+                            "Startup memory capture duration. Must be positive and within rest.profiling.duration-max.");
+
+    /** Include native allocation stacks in the startup memory recording. */
+    public static final ConfigOption<Boolean> PYTHON_MEMORY_STARTUP_NATIVE =
+            ConfigOptions.key("python.memory-profiling.startup.native")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Include native allocation stacks in the startup memory recording.");
+
     /** The configuration to enable or disable profile for Python execution. */
     public static final ConfigOption<Boolean> PYTHON_PROFILE_ENABLED =
             ConfigOptions.key("python.profile.enabled")

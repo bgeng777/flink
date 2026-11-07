@@ -86,6 +86,14 @@ public class TaskManagerProfilingHandler
                     "Specify a JVM mode or a Python workerId; includeIdle and includeNative are Python-only.",
                     HttpResponseStatus.BAD_REQUEST);
         }
+        if (profilingRequest.getWorkerId() != null
+                && (profilingRequest.getType() == null
+                        || (profilingRequest.getType() == ProfilingInfo.PythonProfilingType.MEMORY
+                                && profilingRequest.hasIncludeIdle()))) {
+            throw new RestHandlerException(
+                    "Python requests require CPU or MEMORY type; includeIdle is CPU-only.",
+                    HttpResponseStatus.BAD_REQUEST);
+        }
         if (profilingRequest.getWorkerId() != null && profilingRequest.getWorkerId().isBlank()) {
             throw new RestHandlerException(
                     "workerId must not be empty.", HttpResponseStatus.BAD_REQUEST);

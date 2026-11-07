@@ -324,17 +324,35 @@ public class RestOptions {
                     .defaultValue(false)
                     .withDescription("Enables the experimental profiler feature.");
 
-    /** Optional executable for profiling standalone Python workers. */
+    /** Optional executable for CPU profiling of standalone Python workers. */
     @Documentation.Section(Documentation.Sections.EXPERT_REST)
-    public static final ConfigOption<String> PYTHON_PROFILING_EXECUTABLE =
-            key("rest.python-profiling.executable")
+    public static final ConfigOption<String> PYTHON_CPU_PROFILING_EXECUTABLE =
+            key("rest.python-profiling.cpu.executable")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
                             "Absolute path of an administrator-installed py-spy executable. "
-                                    + "Together with rest.profiling.enabled, enables on-demand profiling "
+                                    + "Together with rest.profiling.enabled, enables on-demand CPU profiling "
                                     + "of standalone Python workers. The TaskManager must have permission "
                                     + "to inspect these processes. No profiling tool is installed automatically.");
+
+    /** Optional Memray CLI for explicitly enabled injection into Python workers. */
+    @Documentation.Section(Documentation.Sections.EXPERT_REST)
+    public static final ConfigOption<String> PYTHON_MEMORY_PROFILING_EXECUTABLE =
+            key("rest.python-profiling.memory.executable")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Absolute path to Memray for attach/detach. Memray must also be installed in the worker Python environment. No automatic installation or elevation is performed.");
+
+    /** Memray injection can crash or deadlock the target process. */
+    @Documentation.Section(Documentation.Sections.EXPERT_REST)
+    public static final ConfigOption<Boolean> PYTHON_MEMORY_ATTACH_ENABLED =
+            key("rest.python-profiling.memory.attach-enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Allows Memray injection into running Python workers. This can crash or deadlock a worker and affect the job. Requires rest.profiling.enabled and a Memray executable.");
 
     /** Maximum history size of profiling list. */
     @Documentation.Section(Documentation.Sections.EXPERT_REST)

@@ -28,6 +28,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from pyflink.fn_execution import _worker_memory_profiling as profiling
+from pyflink.fn_execution._worker_profiling import register_worker
 
 
 class WorkerMemoryProfilingTests(unittest.TestCase):
@@ -40,6 +41,7 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
             'PYFLINK_MEMRAY_OUTPUT_DIR': str(self.output),
             'PYFLINK_MEMRAY_DELAY': '0',
             'PYFLINK_MEMRAY_DURATION': '3600',
+            'PYFLINK_MEMRAY_MAX_DURATION': '3600',
             'PYFLINK_MEMRAY_NATIVE_TRACES': 'false',
         }))
         self.entered = Event()
@@ -75,8 +77,31 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
                 owner.closed.set()
 
         self.contexts.enter_context(patch.dict(sys.modules, {
-            'memray': SimpleNamespace(Tracker=Tracker, FileDestination=FileDestination),
+            'memray': SimpleNamespace(
+                Tracker=Tracker, FileDestination=FileDestination, __version__='test'),
         }))
+
+    def test_registration_reports_preparation_and_startup_completion(self):
+        import json
+        with patch.dict(os.environ, {
+            'PYFLINK_WORKER_PROFILE_DIR': str(self.output.parent / 'registry'),
+            'WORKER_ID': 'beam-test', 'PYFLINK_MEMRAY_PREPARE': 'true',
+            'PYFLINK_WORKER_PROFILE_JOB_ID': 'job-a',
+            'PYFLINK_MEMRAY_ATTACH': 'true', 'PYFLINK_MEMRAY_CPROFILE': 'false',
+        }):
+            with register_worker() as registration:
+                self.assertTrue(json.loads(registration.read_text())['memory_available'])
+                self.assertEqual(json.loads(registration.read_text())['job_id'], 'job-a')
+                self.assertTrue(json.loads(registration.read_text())['memory_busy'])
+                with profiling.profile_worker_memory(registration):
+                    self.assertTrue(json.loads(registration.read_text())['memory_busy'])
+                self.assertFalse(json.loads(registration.read_text())['memory_busy'])
+
+    def test_cprofile_conflict_skips_startup_capture(self):
+        with patch.dict(os.environ, {'PYFLINK_MEMRAY_CPROFILE': 'true'}):
+            with self.assertLogs(level='WARNING'):
+                with profiling.profile_worker_memory():
+                    self.assertFalse(self.entered.is_set())
 
     def test_disabled_does_not_import_memray_or_start_thread(self):
         os.environ.pop('PYFLINK_MEMRAY_OUTPUT_DIR')
@@ -98,7 +123,7 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
         captures = list(self.output.glob('*.bin'))
         self.assertEqual(1, len(captures))
         self.assertEqual(b'closed', captures[0].read_bytes())
-        self.assertIn('worker-%s-' % os.getpid(), captures[0].name)
+        self.assertIn('startup-%s-' % os.getpid(), captures[0].name)
         self.assertFalse(list(self.output.glob('*.inprogress')))
         self.assertFalse(self.native_traces)
         output = '\n'.join(logs.output)

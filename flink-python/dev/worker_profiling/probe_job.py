@@ -42,7 +42,7 @@ if __name__ == '__main__':
     configuration.set_boolean('rest.profiling.enabled', True)
     configuration.set_string('rest.bind-address', '127.0.0.1')
     configuration.set_string('rest.bind-port', os.environ['PYFLINK_PROFILE_REST_PORT'])
-    configuration.set_string('rest.python-profiling.executable',
+    configuration.set_string('rest.python-profiling.cpu.executable',
                              os.environ['PYFLINK_PROFILE_EXECUTABLE'])
     configuration.set_string('rest.profiling.dir', os.environ['PYFLINK_PROFILE_OUTPUT'])
     env = StreamExecutionEnvironment.get_execution_environment(configuration)

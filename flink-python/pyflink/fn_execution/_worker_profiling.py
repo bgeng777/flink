@@ -16,7 +16,7 @@
 # specific language governing permissions and limitations
 # under the License.
 ################################################################################
-"""Experimental local worker registration; not a supported configuration/API."""
+"""Private worker identity and profiling preparation for the TaskManager."""
 
 import json
 import logging
@@ -65,11 +65,25 @@ def register_worker():
     try:
         root = Path(directory)
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        memory_available = False
+        if os.environ.get('PYFLINK_MEMRAY_PREPARE') == 'true':
+            try:
+                import memray
+                memory_available = os.environ.get('PYFLINK_MEMRAY_CPROFILE') != 'true'
+                logging.info('Memray prepared: version=%s, attach=%s, cprofile=%s',
+                             memray.__version__, os.environ.get('PYFLINK_MEMRAY_ATTACH'),
+                             os.environ.get('PYFLINK_MEMRAY_CPROFILE'))
+            except (ImportError, OSError):
+                logging.warning('Memray unavailable in worker Python environment', exc_info=True)
         registration = {
             'registration_id': uuid.uuid4().hex,
             'worker_id': os.environ['WORKER_ID'],
+            'job_id': os.environ.get('PYFLINK_WORKER_PROFILE_JOB_ID', ''),
             'pid': os.getpid(),
             'start_token': process_identity(os.getpid()),
+            'memory_available': (memory_available and
+                                 os.environ.get('PYFLINK_MEMRAY_ATTACH') == 'true'),
+            'memory_busy': bool(os.environ.get('PYFLINK_MEMRAY_OUTPUT_DIR')),
         }
         path = root / (registration['registration_id'] + '.json')
         temporary = path.with_suffix('.tmp')
@@ -83,10 +97,25 @@ def register_worker():
         logging.warning('Could not register Python worker for profiling', exc_info=True)
 
     try:
-        yield
+        yield path
     finally:
         if path is not None:
             try:
                 path.unlink(missing_ok=True)
             except OSError:
                 logging.warning('Could not remove Python profiling registration', exc_info=True)
+
+
+def finish_startup_memory_capture(path):
+    if path is None:
+        return
+    try:
+        registration = json.loads(path.read_text())
+        registration['memory_busy'] = False
+        temporary = path.with_suffix('.tmp')
+        with temporary.open('w') as output:
+            os.chmod(temporary, 0o600)
+            json.dump(registration, output)
+        temporary.replace(path)
+    except OSError:
+        logging.warning('Could not update startup memory status', exc_info=True)

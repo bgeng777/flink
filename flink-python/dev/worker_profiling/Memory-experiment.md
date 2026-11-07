@@ -17,51 +17,72 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Python worker memory capture experiment
+# Python worker memory profiling prototype
 
-This implements the startup experiment in Appendix A of the local profiling FLIP.
-It is experimental: the environment variables below are not public Flink configuration.
-It uses Memray's public `Tracker` API in the standalone Beam SDK worker process.
-UDFs need no changes. Embedded and loopback workers are not instrumented.
+The local prototype implements both memory modes in the revised [FLIP](FLIP-draft.en.md):
+startup capture using Memray's public Tracker API and separately enabled on-demand attach/detach.
+It reuses Flink's profiler REST/RPC, history, local result directory and BLOB download. No new worker
+control protocol, profiler SPI or in-cluster report renderer is introduced. This is not a released
+or community-approved feature.
 
 ## Deployment
 
-Install Memray in the worker's diagnostic Python environment, using the existing
-Python dependency or environment deployment mechanism. Memray is optional and is
-not added to PyFlink's dependencies. The experiment is tested with Memray 1.20.0.
+Install Memray in the worker's Python environment. Attach also requires a compatible Memray CLI
+and debugger on the TaskManager, with permission to inspect the worker. Memray is optional and
+is not added to PyFlink's dependencies. The tested combination is Memray 1.20.0, CPython 3.11.18,
+Beam 2.75.0 and Linux AArch64.
 
-Set these environment variables on the TaskManager before starting the selected
-diagnostic deployment. The existing `python.systemenv.enabled` option must allow
-inheritance for this approach. If inheritance is disabled, set them in a wrapper
-used as `python.executable`; this does not require any change to the UDF.
+Configure the existing profiler and the shared local output directory on the TaskManager:
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `PYFLINK_MEMRAY_OUTPUT_DIR` | Unset: disabled | Local directory on the TM for capture files |
-| `PYFLINK_MEMRAY_DELAY` | `0` | Non-negative delay in seconds from the worker startup hook |
-| `PYFLINK_MEMRAY_DURATION` | `60` | Positive duration in seconds after Tracker starts |
-| `PYFLINK_MEMRAY_NATIVE_TRACES` | `false` | `true` adds native C/C++ allocation stacks |
-
-For example, start recording after 120 seconds and capture for 60 seconds:
-
-```sh
-export PYFLINK_MEMRAY_OUTPUT_DIR=/flink/log/memory-profiles
-export PYFLINK_MEMRAY_DELAY=120
-export PYFLINK_MEMRAY_DURATION=60
-export PYFLINK_MEMRAY_NATIVE_TRACES=true
-bin/start-cluster.sh
+```yaml
+rest.profiling.enabled: true
+rest.profiling.dir: /flink/log/profiling
 ```
 
-The directory must be writable by the worker. It can be the same local directory
-as `rest.profiling.dir`, but this experiment does not read that option or register
-its files in REST profiling history. Retrieve the files through the deployment's
-existing log/file access mechanism. There is no new REST endpoint or Web UI.
+For a delayed startup capture, set these job options:
 
-Each worker start schedules one capture. Restarts schedule another capture with a
-distinct filename. Applying the environment to an entire TM instruments every new
-standalone Python worker there; use a small diagnostic deployment and manage disk
-space and retention explicitly. The CPU profiler's enable flag and active-session
-limit do not control this experiment.
+```yaml
+python.memory-profiling.startup.enabled: true
+python.memory-profiling.startup.delay: 120 s
+python.memory-profiling.startup.duration: 60 s
+python.memory-profiling.startup.native: true
+```
+
+Defaults are disabled, zero delay, 60 seconds and no native stacks. The duration must not exceed
+`rest.profiling.duration-max`. The worker must be able to write to the configured directory.
+The options travel through the existing managed Python environment, including with general
+system-environment inheritance disabled. Legacy `PYFLINK_MEMRAY_*` variables are not configuration
+aliases; the TM overrides inherited values with the resolved configuration.
+
+Each worker start schedules one capture, and restarts use distinct filenames. Startup files share
+`rest.profiling.dir` and the filename-based TaskManager download route, but not REST history or
+its retention policy. The deployment owns cleanup and capacity planning for these files.
+
+For on-demand attach, additionally configure:
+
+```yaml
+rest.python-profiling.memory.executable: /opt/diagnostics/bin/memray
+rest.python-profiling.memory.attach-enabled: true
+```
+
+**Attach/detach can deadlock or crash a worker and cause job recovery.** It is disabled by default;
+the UI requires explicit risk acknowledgment. Discover a prepared worker through
+`GET /taskmanagers/:tm/python-workers`, then use the existing endpoint:
+
+```text
+POST /taskmanagers/:tm/profiler
+{"workerId":"<returned id>","type":"MEMORY","duration":30,"includeNative":false}
+```
+
+`includeIdle` is not accepted. A startup window pending or recording in that worker returns 409;
+disabled or unavailable attach returns 503. PyFlink cProfile prevents memory profiling in that worker.
+The deployment must not run another independent Memray controller concurrently.
+
+The TM runs attach, waits, and explicitly detaches on the profiling executor. CLI completion alone
+is not capture completion. A target-side timer is a fallback, not proof of successful closure.
+Only confirmed closure publishes a `.bin`. Unconfirmed stop leaves a failed session, an incomplete
+artifact, and the JVM-wide REST slot reserved until the original worker exits. CLI/debugger cleanup
+is bounded; Flink does not terminate the business worker to recover the profiler.
 
 ## Lifecycle and artifacts
 
@@ -76,7 +97,8 @@ thread and joins it. An unstarted capture is cancelled; an active capture closes
 once. UDF exceptions retain their original behavior. No profiler process is attached,
 and no worker is killed or restarted to end capture.
 
-Files start as `worker-<pid>-<unique-id>.bin.inprogress`. Only successful Tracker
+Startup files begin as `python-memory-startup-<pid>-<unique-id>.bin.inprogress`;
+attach files begin as `python-memory-<unique-id>.bin.inprogress`. Only successful Tracker
 closure and file finalization publish a `.bin` file. INFO logs include effective
 options, actual start/end timestamps, PID, filename, and completion or cancellation.
 Failed captures log a warning and retain any incomplete file for diagnosis.
@@ -95,9 +117,9 @@ Keep the original `.bin` file. Generate reports offline, preferably in the same
 environment as the worker so that native libraries and debug symbols match:
 
 ```sh
-python -m memray flamegraph -o allocations.html /flink/log/memory-profiles/worker-123-id.bin
-python -m memray stats /flink/log/memory-profiles/worker-123-id.bin
-python -m memray tree /flink/log/memory-profiles/worker-123-id.bin
+python -m memray flamegraph -o allocations.html /flink/log/profiling/python-memory-startup-123-id.bin
+python -m memray stats /flink/log/profiling/python-memory-startup-123-id.bin
+python -m memray tree /flink/log/profiling/python-memory-startup-123-id.bin
 ```
 
 Captures use Memray's default allocation format, with compression on closure disabled
@@ -126,6 +148,9 @@ with zlib. Confirm that reports contain `allocate_image_buffer` and
 After `.bin` appears, verify that the same PID keeps producing increasing sequence
 numbers, then cancel the smoke job. This is a functional check, not a Torch/YOLO
 benchmark or a production overhead guarantee.
+
+The [formal-memory validation report](../../../output/playwright/pyflink-20261107/formal-memory/run.md)
+records the latest real attach and startup results and remaining gaps.
 
 See [Memray's API](https://bloomberg.github.io/memray/api.html) and
 [native stack resolution](https://bloomberg.github.io/memray/native_mode.html).

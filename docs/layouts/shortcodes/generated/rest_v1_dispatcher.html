@@ -1405,6 +1405,10 @@ Using 'curl' you can upload a jar via 'curl -X POST -H "Expect:" -F "jarfile=@pa
       "type" : "string",
       "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
     },
+    "type" : {
+      "type" : "string",
+      "enum" : [ "CPU", "MEMORY" ]
+    },
     "workerId" : {
       "type" : "string"
     }
@@ -1455,12 +1459,43 @@ Using 'curl' you can upload a jar via 'curl -X POST -H "Expect:" -F "jarfile=@pa
     "triggerTime" : {
       "type" : "integer"
     },
+    "type" : {
+      "type" : "string",
+      "enum" : [ "CPU", "MEMORY" ]
+    },
     "worker" : {
       "type" : "object",
       "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
       "properties" : {
         "id" : {
           "type" : "string"
+        },
+        "memoryProfilingAvailable" : {
+          "type" : "boolean"
+        },
+        "operators" : {
+          "type" : "array",
+          "items" : {
+            "type" : "object",
+            "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+            "properties" : {
+              "attemptNumber" : {
+                "type" : "integer"
+              },
+              "jobId" : {
+                "type" : "string"
+              },
+              "operatorId" : {
+                "type" : "string"
+              },
+              "operatorName" : {
+                "type" : "string"
+              },
+              "subtaskIndex" : {
+                "type" : "integer"
+              }
+            }
+          }
         },
         "pid" : {
           "type" : "integer"
@@ -1543,12 +1578,43 @@ Using 'curl' you can upload a jar via 'curl -X POST -H "Expect:" -F "jarfile=@pa
           "triggerTime" : {
             "type" : "integer"
           },
+          "type" : {
+            "type" : "string",
+            "enum" : [ "CPU", "MEMORY" ]
+          },
           "worker" : {
             "type" : "object",
             "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
             "properties" : {
               "id" : {
                 "type" : "string"
+              },
+              "memoryProfilingAvailable" : {
+                "type" : "boolean"
+              },
+              "operators" : {
+                "type" : "array",
+                "items" : {
+                  "type" : "object",
+                  "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+                  "properties" : {
+                    "attemptNumber" : {
+                      "type" : "integer"
+                    },
+                    "jobId" : {
+                      "type" : "string"
+                    },
+                    "operatorId" : {
+                      "type" : "string"
+                    },
+                    "operatorName" : {
+                      "type" : "string"
+                    },
+                    "subtaskIndex" : {
+                      "type" : "integer"
+                    }
+                  }
+                }
               },
               "pid" : {
                 "type" : "integer"
@@ -7301,6 +7367,10 @@ Using 'curl' you can upload a jar via 'curl -X POST -H "Expect:" -F "jarfile=@pa
       "type" : "string",
       "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
     },
+    "type" : {
+      "type" : "string",
+      "enum" : [ "CPU", "MEMORY" ]
+    },
     "workerId" : {
       "type" : "string"
     }
@@ -7351,12 +7421,43 @@ Using 'curl' you can upload a jar via 'curl -X POST -H "Expect:" -F "jarfile=@pa
     "triggerTime" : {
       "type" : "integer"
     },
+    "type" : {
+      "type" : "string",
+      "enum" : [ "CPU", "MEMORY" ]
+    },
     "worker" : {
       "type" : "object",
       "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
       "properties" : {
         "id" : {
           "type" : "string"
+        },
+        "memoryProfilingAvailable" : {
+          "type" : "boolean"
+        },
+        "operators" : {
+          "type" : "array",
+          "items" : {
+            "type" : "object",
+            "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+            "properties" : {
+              "attemptNumber" : {
+                "type" : "integer"
+              },
+              "jobId" : {
+                "type" : "string"
+              },
+              "operatorId" : {
+                "type" : "string"
+              },
+              "operatorName" : {
+                "type" : "string"
+              },
+              "subtaskIndex" : {
+                "type" : "integer"
+              }
+            }
+          }
         },
         "pid" : {
           "type" : "integer"
@@ -7459,12 +7560,43 @@ Using 'curl' you can upload a jar via 'curl -X POST -H "Expect:" -F "jarfile=@pa
           "triggerTime" : {
             "type" : "integer"
           },
+          "type" : {
+            "type" : "string",
+            "enum" : [ "CPU", "MEMORY" ]
+          },
           "worker" : {
             "type" : "object",
             "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
             "properties" : {
               "id" : {
                 "type" : "string"
+              },
+              "memoryProfilingAvailable" : {
+                "type" : "boolean"
+              },
+              "operators" : {
+                "type" : "array",
+                "items" : {
+                  "type" : "object",
+                  "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+                  "properties" : {
+                    "attemptNumber" : {
+                      "type" : "integer"
+                    },
+                    "jobId" : {
+                      "type" : "string"
+                    },
+                    "operatorId" : {
+                      "type" : "string"
+                    },
+                    "operatorName" : {
+                      "type" : "string"
+                    },
+                    "subtaskIndex" : {
+                      "type" : "integer"
+                    }
+                  }
+                }
               },
               "pid" : {
                 "type" : "integer"
@@ -7529,6 +7661,33 @@ Using 'curl' you can upload a jar via 'curl -X POST -H "Expect:" -F "jarfile=@pa
         "properties" : {
           "id" : {
             "type" : "string"
+          },
+          "memoryProfilingAvailable" : {
+            "type" : "boolean"
+          },
+          "operators" : {
+            "type" : "array",
+            "items" : {
+              "type" : "object",
+              "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+              "properties" : {
+                "attemptNumber" : {
+                  "type" : "integer"
+                },
+                "jobId" : {
+                  "type" : "string"
+                },
+                "operatorId" : {
+                  "type" : "string"
+                },
+                "operatorName" : {
+                  "type" : "string"
+                },
+                "subtaskIndex" : {
+                  "type" : "integer"
+                }
+              }
+            }
           },
           "pid" : {
             "type" : "integer"

@@ -38,8 +38,8 @@ describe('TaskManagerProfilerComponent', () => {
   const createProfilingInstance = vi.fn();
   const loadPythonWorkers = vi.fn();
   let refresh: Subject<boolean>;
-  const firstWorker: PythonWorkerInfo = { id: 'one', pid: 123 };
-  const secondWorker: PythonWorkerInfo = { id: 'two', pid: 456 };
+  const firstWorker: PythonWorkerInfo = { id: 'one', pid: 123, memoryProfilingAvailable: false, operators: [] };
+  const secondWorker: PythonWorkerInfo = { id: 'two', pid: 456, memoryProfilingAvailable: false, operators: [] };
   const warning = vi.fn();
   let component: TaskManagerProfilerComponent;
 
@@ -59,6 +59,19 @@ describe('TaskManagerProfilerComponent', () => {
   });
 
   afterEach(() => component.ngOnDestroy());
+
+  it('labels a shared worker with both operator instances', () => {
+    const worker: PythonWorkerInfo = {
+      ...firstWorker,
+      operators: [
+        { jobId: 'job-123456', operatorId: 'a', operatorName: 'decode', subtaskIndex: 0, attemptNumber: 1 },
+        { jobId: 'job-123456', operatorId: 'b', operatorName: 'infer', subtaskIndex: 0, attemptNumber: 1 }
+      ]
+    };
+    expect(component.workerLabel(worker)).toBe(
+      'decode [0] (attempt 1, job job-1234), infer [0] (attempt 1, job job-1234) — PID 123'
+    );
+  });
 
   it('loads the profiling list for the routed task manager on refresh', () => {
     loadProfilingList.mockReturnValue(of({ profilingList: [{ status: 'FINISHED' } as ProfilingDetail] }));
@@ -120,6 +133,35 @@ describe('TaskManagerProfilerComponent', () => {
     expect(component.isCreating).toBe(false);
   });
 
+  it('requires explicit risk confirmation and omits idle for memory attach', () => {
+    loadPythonWorkers.mockReturnValue(of([{ ...firstWorker, memoryProfilingAvailable: true }]));
+    component.ngOnInit();
+    component.setTarget('PYTHON');
+    component.pythonType = 'MEMORY';
+    component.includeIdle = true;
+    component.createProfilingInstance();
+    expect(createProfilingInstance).not.toHaveBeenCalled();
+    component.attachRiskAccepted = true;
+    component.createProfilingInstance();
+    expect(createProfilingInstance).toHaveBeenCalledWith('tm-1', {
+      workerId: 'one',
+      type: 'MEMORY',
+      duration: 30,
+      includeNative: false
+    });
+    expect(component.attachRiskAccepted).toBe(false);
+  });
+
+  it('refuses memory capture when the worker has no prepared Memray', () => {
+    loadPythonWorkers.mockReturnValue(of([firstWorker]));
+    component.ngOnInit();
+    component.setTarget('PYTHON');
+    component.pythonType = 'MEMORY';
+    component.attachRiskAccepted = true;
+    component.createProfilingInstance();
+    expect(createProfilingInstance).not.toHaveBeenCalled();
+  });
+
   it('refuses to start a new profiling run while one is still running', () => {
     component.profilingList = [{ status: 'RUNNING' } as ProfilingDetail];
 
@@ -145,6 +187,7 @@ describe('TaskManagerProfilerComponent', () => {
     component.createProfilingInstance();
     expect(createProfilingInstance).toHaveBeenCalledWith('tm-1', {
       workerId: 'one',
+      type: 'CPU',
       duration: 30,
       includeNative: true,
       includeIdle: true
@@ -163,6 +206,7 @@ describe('TaskManagerProfilerComponent', () => {
     component.createProfilingInstance();
     expect(createProfilingInstance).toHaveBeenCalledWith('tm-1', {
       workerId: 'two',
+      type: 'CPU',
       duration: 30,
       includeNative: false,
       includeIdle: false
@@ -222,7 +266,7 @@ describe('TaskManagerProfilerComponent', () => {
 describe('TaskManagerProfilerComponent rendering', () => {
   let fixture: ComponentFixture<TaskManagerProfilerComponent>;
   let element: HTMLElement;
-  const worker: PythonWorkerInfo = { id: 'registered', pid: 123 };
+  const worker: PythonWorkerInfo = { id: 'registered', pid: 123, memoryProfilingAvailable: false, operators: [] };
   const loadPythonWorkers = vi.fn();
   const createProfilingInstance = vi.fn();
   const profile: ProfilingDetail = {
@@ -271,7 +315,7 @@ describe('TaskManagerProfilerComponent rendering', () => {
     expect(element.querySelector('nz-select[name="mode"]')).toBeNull();
     expect(element.querySelector('nz-select[name="worker"]')?.textContent).toContain('PID 123');
     expect(element.textContent).toContain('Include native stacks');
-    expect(element.textContent).toContain('Python + native');
+    expect(element.textContent).toContain('CPU + native');
     expect(element.textContent).toContain('Python PID 123');
     const nativeToggle = element.querySelector<HTMLInputElement>('label[name="includeNative"] input');
     nativeToggle!.click();
@@ -279,6 +323,7 @@ describe('TaskManagerProfilerComponent rendering', () => {
     element.querySelector<HTMLButtonElement>('button[nz-button]')!.click();
     expect(createProfilingInstance).toHaveBeenCalledWith('tm-1', {
       workerId: 'registered',
+      type: 'CPU',
       duration: 30,
       includeNative: true,
       includeIdle: false

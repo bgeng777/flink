@@ -21,9 +21,11 @@ package org.apache.flink.runtime.util.profiler;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo.Operator;
 import org.apache.flink.runtime.util.profiler.PythonWorkerRegistry.Worker;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -88,6 +91,7 @@ class PythonWorkerProfilingTest {
                         Map.of(
                                 "registration_id", registered.getId(),
                                 "worker_id", "beam-worker",
+                                "job_id", "job-a",
                                 "pid", registered.getPid(),
                                 "start_token", registered.getStartToken()));
         return registered;
@@ -120,7 +124,7 @@ class PythonWorkerProfilingTest {
     }
 
     private void awaitCompletion() throws Exception {
-        waitUntilCondition(() -> service.getProfilingFuture().isDone(), 20L, 500);
+        waitUntilCondition(() -> service.getProfilingFuture().isDone(), 20L, 1000);
     }
 
     @Test
@@ -139,6 +143,87 @@ class PythonWorkerProfilingTest {
         workerProcess.destroyForcibly();
         workerProcess.waitFor();
         assertThat(registry.listWorkers()).isEmpty();
+    }
+
+    @Test
+    void removesOnlyTheClosingOperatorFromASharedWorker() throws Exception {
+        final Path first =
+                registry.registerOperator(
+                        "beam-worker", "execution-a", new Operator("job-a", "a", "decode", 0, 0));
+        final Path second =
+                registry.registerOperator(
+                        "beam-worker", "execution-b", new Operator("job-a", "b", "infer", 0, 1));
+        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators())
+                .extracting(Operator::getOperatorName)
+                .containsExactlyInAnyOrder("decode", "infer");
+        Files.delete(first);
+        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators())
+                .extracting(Operator::getOperatorName)
+                .containsExactly("infer");
+        Files.delete(second);
+        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators()).isEmpty();
+        assertThat(workerProcess.isAlive()).isTrue();
+    }
+
+    @Test
+    void removesTemporaryOperatorRegistrationWhenMoveFails() throws Exception {
+        final Path operators =
+                PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile())
+                        .resolve("operators");
+        final Path registration = operators.resolve("execution-a_a.json");
+        Files.createDirectories(registration);
+        final Path unrelated = registration.resolve("keep.txt");
+        Files.writeString(unrelated, "keep");
+
+        assertThatThrownBy(
+                        () ->
+                                registry.registerOperator(
+                                        "beam-worker",
+                                        "execution-a",
+                                        new Operator("job-a", "a", "decode", 0, 0)))
+                .isInstanceOf(FileSystemException.class)
+                .hasMessageContaining(registration.toString());
+        assertThat(operators.resolve("execution-a_a.json.tmp")).doesNotExist();
+        assertThat(unrelated).hasContent("keep");
+    }
+
+    @Test
+    void separatesTheSameBeamWorkerIdInDifferentJobs() throws Exception {
+        final Process secondProcess = new ProcessBuilder("/bin/sh", "-c", "exec sleep 60").start();
+        try {
+            final Worker second = registerWorker(secondProcess);
+            final Path registration =
+                    PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile())
+                            .resolve(second.getId() + ".json");
+            final ObjectMapper mapper = new ObjectMapper();
+            final ObjectNode record = (ObjectNode) mapper.readTree(Files.readString(registration));
+            record.put("job_id", "job-b");
+            mapper.writeValue(registration.toFile(), record);
+            registry.registerOperator(
+                    "beam-worker", "execution-a", new Operator("job-a", "a", "decode", 0, 0));
+            registry.registerOperator(
+                    "beam-worker", "execution-b", new Operator("job-b", "b", "infer", 0, 0));
+            assertThat(registry.getWorker(worker.getId()).toInfo().getOperators())
+                    .extracting(Operator::getOperatorName)
+                    .containsExactly("decode");
+            assertThat(registry.getWorker(second.getId()).toInfo().getOperators())
+                    .extracting(Operator::getOperatorName)
+                    .containsExactly("infer");
+        } finally {
+            secondProcess.destroyForcibly();
+            secondProcess.waitFor(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void ignoresUnrecognizedOperatorRecords() throws Exception {
+        final Path operators =
+                PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile())
+                        .resolve("operators");
+        Files.createDirectories(operators);
+        Files.writeString(operators.resolve("unrelated.json"), "{}");
+        Files.writeString(operators.resolve("broken.json"), "{");
+        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators()).isEmpty();
     }
 
     @Test
@@ -215,7 +300,7 @@ class PythonWorkerProfilingTest {
         sampler(
                 "echo partial > \"$output\"\necho $$ > '"
                         + temporary.resolve("ready")
-                        + "'\nexec sleep 60");
+                        + "'\ntrap '' INT\nexec sleep 60");
         start();
         waitUntilCondition(() -> Files.exists(temporary.resolve("ready")), 20L, 250);
         return Long.parseLong(Files.readString(temporary.resolve("ready")).trim());
@@ -348,6 +433,33 @@ class PythonWorkerProfilingTest {
     }
 
     @Test
+    void stopsSamplingAtDurationAndWaitsForOutput() throws Exception {
+        final Path stopped = temporary.resolve("stopped");
+        final Path release = temporary.resolve("finish-output");
+        sampler(
+                "trap 'echo stopped > \""
+                        + stopped
+                        + "\"; while [ ! -e \""
+                        + release
+                        + "\" ]; do sleep 0.05; done; "
+                        + "printf \"<svg>FINISHED AFTER INTERRUPT</svg>\" > \"$output\"; "
+                        + "echo \"Samples: 1 Errors: 0\"; exit 0' INT\n"
+                        + "while :; do sleep 0.05; done");
+        final ProfilingInfo info = start();
+        try {
+            waitUntilCondition(() -> Files.exists(stopped), 20L, 250);
+            assertThat(info.getStatus()).isEqualTo(ProfilingInfo.ProfilingStatus.RUNNING);
+            assertThat(info.getOutputFile()).isNull();
+        } finally {
+            Files.writeString(release, "finish");
+        }
+        awaitCompletion();
+        assertThat(info.getStatus()).isEqualTo(ProfilingInfo.ProfilingStatus.FINISHED);
+        assertThat(output.resolve(info.getOutputFile()))
+                .hasContent("<svg>FINISHED AFTER INTERRUPT</svg>");
+    }
+
+    @Test
     void deadlineReapsAnUnresponsiveSampler() throws Exception {
         final long pid = startBlockingSampler();
         awaitCompletion();
@@ -414,6 +526,100 @@ class PythonWorkerProfilingTest {
         service.cancelPythonProfiling("tm").get(5, TimeUnit.SECONDS);
         assertThat(service.getProfilingFuture().isDone()).isFalse();
         assertThat(jvm.getStatus()).isEqualTo(ProfilingInfo.ProfilingStatus.RUNNING);
+    }
+
+    private void memorySampler(boolean failDetach) throws Exception {
+        Files.writeString(
+                sampler,
+                "#!/bin/sh\nif [ \"$1\" = detach ]; then exit "
+                        + (failDetach ? "1" : "0")
+                        + "; fi\n"
+                        + "while [ \"$#\" -gt 0 ]; do if [ \"$1\" = -o ]; then shift; output=$1; fi; shift; done\n"
+                        + "printf 'MEMRAY TEST FIXTURE' > \"$output\"\n");
+        Files.setPosixFilePermissions(sampler, PosixFilePermissions.fromString("rwx------"));
+    }
+
+    @Test
+    void memoryCapturePublishesOnlyAfterDetach() throws Exception {
+        memorySampler(false);
+        final ProfilingInfo info =
+                service.requestPythonMemoryProfiling(
+                                "tm", 1, worker, registry, sampler.toString(), true)
+                        .get();
+        assertThat(info.getType()).isEqualTo(ProfilingInfo.PythonProfilingType.MEMORY);
+        assertThat(info.getOutputFile()).isNull();
+        awaitCompletion();
+        assertThat(info.getStatus()).isEqualTo(ProfilingInfo.ProfilingStatus.FINISHED);
+        assertThat(output.resolve(info.getOutputFile())).hasContent("MEMRAY TEST FIXTURE");
+        assertThat(info.getIncludeIdle()).isNull();
+        assertThat(workerProcess.isAlive()).isTrue();
+    }
+
+    @Test
+    void failedMemoryDetachRetainsReservationAndIncompleteFile() throws Exception {
+        memorySampler(true);
+        final ProfilingInfo info =
+                service.requestPythonMemoryProfiling(
+                                "tm", 1, worker, registry, sampler.toString(), false)
+                        .get();
+        waitUntilCondition(
+                () -> info.getStatus() == ProfilingInfo.ProfilingStatus.FAILED, 20L, 500);
+        assertThat(info.getMessage()).contains("stop unconfirmed");
+        assertThat(info.getOutputFile()).isNull();
+        assertThat(service.getProfilingFuture().isDone()).isFalse();
+        try (java.util.stream.Stream<Path> files = Files.list(output)) {
+            assertThat(files.filter(path -> path.toString().endsWith(".inprogress"))).hasSize(1);
+        }
+        workerProcess.destroyForcibly();
+        workerProcess.waitFor();
+        awaitCompletion();
+    }
+
+    @Test
+    void cancelledMemoryAttachReapsDebuggerBeforeDetach() throws Exception {
+        final Path debuggerPid = temporary.resolve("debugger-pid");
+        Files.writeString(
+                sampler,
+                "#!/bin/sh\nif [ \"$1\" = detach ]; then exit 0; fi\n"
+                        + "sleep 60 &\nchild=$!\necho $child > '"
+                        + debuggerPid
+                        + "'\nwait $child\n");
+        Files.setPosixFilePermissions(sampler, PosixFilePermissions.fromString("rwx------"));
+        final ProfilingInfo info =
+                service.requestPythonMemoryProfiling(
+                                "tm", 30, worker, registry, sampler.toString(), false)
+                        .get();
+        waitUntilCondition(() -> Files.exists(debuggerPid) && Files.size(debuggerPid) > 0);
+        final long pid = Long.parseLong(Files.readString(debuggerPid).trim());
+        service.cancelPythonProfiling("tm").get(10, TimeUnit.SECONDS);
+        assertThat(ProcessHandle.of(pid).filter(ProcessHandle::isAlive)).isEmpty();
+        assertThat(info.getStatus()).isEqualTo(ProfilingInfo.ProfilingStatus.FAILED);
+        assertThat(info.getMessage()).doesNotContain("stop unconfirmed");
+        assertThat(workerProcess.isAlive()).isTrue();
+    }
+
+    @Test
+    void missingMemoryExecutableDoesNotReserveWorkerUntilExit() throws Exception {
+        final ProfilingInfo info =
+                service.requestPythonMemoryProfiling(
+                                "tm", 1, worker, registry, sampler.toString(), false)
+                        .get();
+        awaitCompletion();
+        assertThat(info.getStatus()).isEqualTo(ProfilingInfo.ProfilingStatus.FAILED);
+        assertThat(info.getMessage()).doesNotContain("stop unconfirmed");
+        assertThat(workerProcess.isAlive()).isTrue();
+    }
+
+    @Test
+    void removesDeadRegistrationButPreservesUnrecognizedFiles() throws Exception {
+        final Path directory = PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile());
+        final Path unrelated = directory.resolve("keep.txt");
+        Files.writeString(unrelated, "keep");
+        workerProcess.destroyForcibly();
+        workerProcess.waitFor();
+        assertThat(registry.listWorkers()).isEmpty();
+        assertThat(directory.resolve(worker.getId() + ".json")).doesNotExist();
+        assertThat(unrelated).hasContent("keep");
     }
 
     @Test

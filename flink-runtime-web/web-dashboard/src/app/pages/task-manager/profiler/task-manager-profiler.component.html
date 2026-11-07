@@ -36,16 +36,31 @@
         <nz-form-control>
           <nz-select
             [(ngModel)]="workerId"
+            (ngModelChange)="attachRiskAccepted = false"
             name="worker"
             nzPlaceHolder="Select a Python worker"
             [nzLoading]="isLoading"
-            style="width: 280px"
+            style="width: 480px"
           >
             <nz-option
               *ngFor="let worker of pythonWorkers"
               [nzValue]="worker.id"
-              [nzLabel]="'PID ' + worker.pid + ' (worker ' + worker.id + ')'"
+              [nzLabel]="workerLabel(worker)"
             ></nz-option>
+          </nz-select>
+        </nz-form-control>
+      </nz-form-item>
+      <nz-form-item *ngIf="target === 'PYTHON'">
+        <nz-form-label nzFor="pythonType">Capture</nz-form-label>
+        <nz-form-control>
+          <nz-select
+            [(ngModel)]="pythonType"
+            (ngModelChange)="attachRiskAccepted = false"
+            name="pythonType"
+            style="width: 180px"
+          >
+            <nz-option nzValue="CPU" nzLabel="CPU"></nz-option>
+            <nz-option nzValue="MEMORY" nzLabel="Memory (attach)"></nz-option>
           </nz-select>
         </nz-form-control>
       </nz-form-item>
@@ -126,7 +141,12 @@
           >
             Include native stacks
           </label>
-          <label nz-checkbox [(ngModel)]="includeIdle" name="includeIdle">
+          <label
+            *ngIf="pythonType === 'CPU'"
+            nz-checkbox
+            [(ngModel)]="includeIdle"
+            name="includeIdle"
+          >
             Include idle threads
           </label>
         </nz-form-control>
@@ -137,7 +157,13 @@
             nz-button
             nzType="primary"
             [nzLoading]="isCreating"
-            [disabled]="duration === null || !isEnabled || (target === 'PYTHON' && !workerId)"
+            [disabled]="
+              duration === null ||
+              !isEnabled ||
+              (target === 'PYTHON' &&
+                (!workerId ||
+                  (pythonType === 'MEMORY' && (!memoryAvailable || !attachRiskAccepted))))
+            "
             (click)="createProfilingInstance()"
             style="margin-left: 10px"
           >
@@ -174,6 +200,24 @@
         </nz-form-control>
       </nz-form-item>
     </form>
+    <div *ngIf="target === 'PYTHON' && pythonType === 'MEMORY'" style="margin-top: 10px">
+      <nz-alert
+        nzType="warning"
+        nzShowIcon
+        nzMessage="Memray attach injects code into the worker and may crash or deadlock it, causing job failure or recovery. It must be explicitly enabled by the administrator."
+      ></nz-alert>
+      <p *ngIf="!memoryAvailable">
+        Memory attach is unavailable for this worker. Check the deployment setting, worker Memray
+        installation and cProfile configuration.
+      </p>
+      <label nz-checkbox [(ngModel)]="attachRiskAccepted">
+        I understand the risk and want to attach Memray.
+      </label>
+      <p>
+        Downloads a Memray binary recording. Generate flamegraph, stats or tree reports offline.
+        Startup recordings are listed in worker logs, not this history.
+      </p>
+    </div>
     <nz-alert
       *ngIf="target === 'PYTHON' && workerLoadFailed"
       nzType="error"
@@ -234,7 +278,12 @@
         <td>{{ info.duration }} s</td>
         <td>{{ info.worker ? 'Python PID ' + info.worker.pid : 'TaskManager JVM' }}</td>
         <td>
-          {{ info.worker ? (info.includeNative ? 'Python + native' : 'Python') : info.mode }}
+          {{
+            info.worker
+              ? (info.type === 'MEMORY' ? 'Memory' : 'CPU') +
+                (info.includeNative ? ' + native' : '')
+              : info.mode
+          }}
           <span *ngIf="info.includeIdle">(including idle)</span>
         </td>
         <td>{{ info.status }}</td>

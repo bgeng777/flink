@@ -184,6 +184,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -407,8 +408,18 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                 isPythonProfilingEnabled(),
                 taskManagerConfiguration
                         .getConfiguration()
-                        .get(RestOptions.PYTHON_PROFILING_EXECUTABLE),
+                        .get(RestOptions.PYTHON_CPU_PROFILING_EXECUTABLE),
                 taskManagerConfiguration.getConfiguration().get(RestOptions.PROFILING_RESULT_DIR));
+
+        log.info(
+                "Python memory attach enabled: {}, executable: {}. Memray injection can crash or deadlock the worker.",
+                taskManagerConfiguration.getConfiguration().get(RestOptions.ENABLE_PROFILER)
+                        && taskManagerConfiguration
+                                .getConfiguration()
+                                .get(RestOptions.PYTHON_MEMORY_ATTACH_ENABLED),
+                taskManagerConfiguration
+                        .getConfiguration()
+                        .get(RestOptions.PYTHON_MEMORY_PROFILING_EXECUTABLE));
 
         this.slotAllocationSnapshotPersistenceService =
                 taskExecutorServices.getSlotAllocationSnapshotPersistenceService();
@@ -1410,6 +1421,14 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                 baseDir = taskManagerConfiguration.getTaskManagerLogDir();
                 break;
             case PROFILER:
+                if (fileName != null
+                        && new File(fileName)
+                                .getName()
+                                .toLowerCase(Locale.ROOT)
+                                .endsWith(".inprogress")) {
+                    return FutureUtils.completedExceptionally(
+                            new FileNotFoundException("Recording is not complete"));
+                }
                 baseDir = profilingService.getProfilingResultDir();
                 break;
             default:
@@ -1562,7 +1581,15 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
         if (!isPythonProfilingEnabled()) {
             return FutureUtils.completedExceptionally(
                     new UnsupportedOperationException(
-                            "Python profiling requires a supported OS, rest.profiling.enabled and rest.python-profiling.executable"));
+                            "Python profiling requires a supported OS and rest.profiling.enabled"));
+        }
+        if (request.getType() != ProfilingInfo.PythonProfilingType.MEMORY
+                && !taskManagerConfiguration
+                        .getConfiguration()
+                        .getOptional(RestOptions.PYTHON_CPU_PROFILING_EXECUTABLE)
+                        .isPresent()) {
+            return FutureUtils.completedExceptionally(
+                    new UnsupportedOperationException("py-spy is not configured"));
         }
         return CompletableFuture.supplyAsync(
                         () -> {
@@ -1580,6 +1607,32 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                                         new FlinkExpectedException(
                                                 "The TaskExecutor is shutting down."));
                             }
+                            if (request.getType() == ProfilingInfo.PythonProfilingType.MEMORY) {
+                                final Configuration config =
+                                        taskManagerConfiguration.getConfiguration();
+                                if (!config.get(RestOptions.PYTHON_MEMORY_ATTACH_ENABLED)
+                                        || !config.getOptional(
+                                                        RestOptions
+                                                                .PYTHON_MEMORY_PROFILING_EXECUTABLE)
+                                                .isPresent()
+                                        || !worker.isMemoryAvailable()) {
+                                    return FutureUtils.completedExceptionally(
+                                            new UnsupportedOperationException(
+                                                    "Memray attach is disabled or unavailable in this worker"));
+                                }
+                                if (worker.isMemoryBusy()) {
+                                    return FutureUtils.completedExceptionally(
+                                            new IllegalStateException(
+                                                    "A startup memory capture is pending or active"));
+                                }
+                                return profilingService.requestPythonMemoryProfiling(
+                                        getResourceID().getResourceIdString(),
+                                        request.getDuration(),
+                                        worker,
+                                        pythonWorkerRegistry,
+                                        config.get(RestOptions.PYTHON_MEMORY_PROFILING_EXECUTABLE),
+                                        request.isIncludeNative());
+                            }
                             return profilingService.requestPythonProfiling(
                                     getResourceID().getResourceIdString(),
                                     request.getDuration(),
@@ -1587,7 +1640,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                                     pythonWorkerRegistry,
                                     taskManagerConfiguration
                                             .getConfiguration()
-                                            .get(RestOptions.PYTHON_PROFILING_EXECUTABLE),
+                                            .get(RestOptions.PYTHON_CPU_PROFILING_EXECUTABLE),
                                     request.isIncludeIdle(),
                                     request.isIncludeNative());
                         },
@@ -1596,11 +1649,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
     private boolean isPythonProfilingEnabled() {
         return (OperatingSystem.isLinux() || OperatingSystem.isMac())
-                && taskManagerConfiguration.getConfiguration().get(RestOptions.ENABLE_PROFILER)
-                && taskManagerConfiguration
-                        .getConfiguration()
-                        .getOptional(RestOptions.PYTHON_PROFILING_EXECUTABLE)
-                        .isPresent();
+                && taskManagerConfiguration.getConfiguration().get(RestOptions.ENABLE_PROFILER);
     }
 
     @Override
@@ -1608,7 +1657,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
         if (!isPythonProfilingEnabled()) {
             return FutureUtils.completedExceptionally(
                     new UnsupportedOperationException(
-                            "Python profiling requires a supported OS, rest.profiling.enabled and rest.python-profiling.executable"));
+                            "Python profiling requires a supported OS and rest.profiling.enabled"));
         }
         return CompletableFuture.supplyAsync(
                 () -> {

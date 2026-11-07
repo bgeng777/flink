@@ -103,6 +103,10 @@ class PythonProfilingRestITCase {
 
     private HttpResponse<String> post(URI base, String path, Map<String, Object> body)
             throws Exception {
+        body = new java.util.HashMap<>(body);
+        if (body.containsKey("workerId")) {
+            body.putIfAbsent("type", "CPU");
+        }
         return client.send(
                 HttpRequest.newBuilder(base.resolve(path))
                         .timeout(Duration.ofSeconds(10))
@@ -131,7 +135,7 @@ class PythonProfilingRestITCase {
         Files.setPosixFilePermissions(sampler, PosixFilePermissions.fromString("rwx------"));
         final Configuration configuration = new Configuration();
         configuration.set(RestOptions.ENABLE_PROFILER, true);
-        configuration.set(RestOptions.PYTHON_PROFILING_EXECUTABLE, sampler.toString());
+        configuration.setString("rest.python-profiling.cpu.executable", sampler.toString());
         configuration.set(
                 RestOptions.PROFILING_RESULT_DIR, temporary.resolve("results").toString());
         configuration.set(RestOptions.BIND_PORT, "0");
@@ -245,7 +249,7 @@ class PythonProfilingRestITCase {
                                     "includeIdle",
                                     true));
             assertThat(accepted.statusCode()).isEqualTo(200);
-            assertThat(mapper.readTree(accepted.body()).path("worker").size()).isEqualTo(2);
+            assertThat(mapper.readTree(accepted.body()).path("worker").size()).isEqualTo(4);
             assertThat(mapper.readTree(accepted.body()).path("worker").path("id").asText())
                     .isEqualTo(id);
             assertThat(
@@ -283,6 +287,25 @@ class PythonProfilingRestITCase {
             assertThat(download.body()).contains("TEST FIXTURE");
             assertThat(download.body())
                     .isEqualTo(Files.readString(temporary.resolve("results").resolve(file)));
+            final String pendingFile = "python-memory-test.bin.inprogress";
+            Files.writeString(temporary.resolve("results").resolve(pendingFile), "incomplete");
+            for (String route : List.of(prefix + "/profiler/", "/jobmanager/profiler/")) {
+                for (String suffix :
+                        List.of("inprogress", "inprogress%2F", "INPROGRESS", "INPROGRESS%2F")) {
+                    assertThat(
+                                    client.send(
+                                                    HttpRequest.newBuilder(
+                                                                    base.resolve(
+                                                                            route
+                                                                                    + "python-memory-test.bin."
+                                                                                    + suffix))
+                                                            .GET()
+                                                            .build(),
+                                                    HttpResponse.BodyHandlers.ofString())
+                                            .statusCode())
+                            .isEqualTo(404);
+                }
+            }
         } finally {
             worker.destroyForcibly();
             worker.waitFor(5, TimeUnit.SECONDS);
@@ -332,7 +355,7 @@ class PythonProfilingRestITCase {
         final Configuration configuration = new Configuration();
         configuration.set(RestOptions.ENABLE_PROFILER, true);
         configuration.set(
-                RestOptions.PYTHON_PROFILING_EXECUTABLE,
+                RestOptions.PYTHON_CPU_PROFILING_EXECUTABLE,
                 temporary.resolve("unused-sampler").toString());
         configuration.set(
                 RestOptions.PROFILING_RESULT_DIR, temporary.resolve("results").toString());
@@ -403,7 +426,7 @@ class PythonProfilingRestITCase {
         Files.setPosixFilePermissions(sampler, PosixFilePermissions.fromString("rwx------"));
         final Configuration configuration = new Configuration();
         configuration.set(RestOptions.ENABLE_PROFILER, true);
-        configuration.set(RestOptions.PYTHON_PROFILING_EXECUTABLE, sampler.toString());
+        configuration.set(RestOptions.PYTHON_CPU_PROFILING_EXECUTABLE, sampler.toString());
         configuration.set(
                 RestOptions.PROFILING_RESULT_DIR, temporary.resolve("results").toString());
         configuration.set(RestOptions.BIND_PORT, "0");
@@ -506,7 +529,7 @@ class PythonProfilingRestITCase {
                                                     .build(),
                                             HttpResponse.BodyHandlers.ofString())
                                     .statusCode())
-                    .isEqualTo(503);
+                    .isEqualTo(200);
             assertThat(
                             post(
                                             base,

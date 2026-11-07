@@ -68,6 +68,13 @@ export class TaskManagerProfilerComponent implements OnInit, OnDestroy {
   workerId: string | null = null;
   workerLoadFailed = false;
   workerUnavailable = false;
+  pythonType: 'CPU' | 'MEMORY' = 'CPU';
+  attachRiskAccepted = false;
+
+  get memoryAvailable(): boolean {
+    return this.pythonWorkers.some(worker => worker.id === this.workerId && worker.memoryProfilingAvailable);
+  }
+
   includeIdle = false;
   includeNative = false;
   profilingList: ProfilingDetail[] = [];
@@ -87,8 +94,17 @@ export class TaskManagerProfilerComponent implements OnInit, OnDestroy {
     private cdr: ChangeDetectorRef
   ) {}
 
+  public workerLabel(worker: PythonWorkerInfo): string {
+    const operators = worker.operators.map(
+      operator =>
+        `${operator.operatorName} [${operator.subtaskIndex}] (attempt ${operator.attemptNumber}, job ${operator.jobId.slice(0, 8)})`
+    );
+    return operators.length > 0 ? `${operators.join(', ')} — PID ${worker.pid}` : `PID ${worker.pid}`;
+  }
+
   public setTarget(target: 'JVM' | 'PYTHON'): void {
     this.target = target;
+    this.attachRiskAccepted = false;
     this.profilingList = [];
     this.workerId = null;
     this.pythonWorkers = [];
@@ -109,12 +125,27 @@ export class TaskManagerProfilerComponent implements OnInit, OnDestroy {
         this.message.warning('Select a Python worker to profile.');
         return;
       }
-      request = {
-        workerId: this.workerId,
-        duration: this.duration,
-        includeIdle: this.includeIdle,
-        includeNative: this.includeNative
-      };
+      if (this.pythonType === 'MEMORY') {
+        if (!this.memoryAvailable || !this.attachRiskAccepted) {
+          this.message.warning('Memray attach requires an available worker and explicit risk confirmation.');
+          return;
+        }
+        request = {
+          workerId: this.workerId,
+          type: 'MEMORY',
+          duration: this.duration,
+          includeNative: this.includeNative
+        };
+        this.attachRiskAccepted = false;
+      } else {
+        request = {
+          workerId: this.workerId,
+          type: 'CPU',
+          duration: this.duration,
+          includeNative: this.includeNative,
+          includeIdle: this.includeIdle
+        };
+      }
     } else {
       request = { mode: this.selectMode, duration: this.duration };
     }
@@ -130,7 +161,7 @@ export class TaskManagerProfilerComponent implements OnInit, OnDestroy {
         },
         error: error => {
           if (error.status === 409) {
-            this.message.warning('Another profiling session is running on this TaskManager.');
+            this.message.warning('A profiling session is active in this Flink JVM or the worker is busy.');
           }
           this.isCreating = false;
           this.cdr.markForCheck();

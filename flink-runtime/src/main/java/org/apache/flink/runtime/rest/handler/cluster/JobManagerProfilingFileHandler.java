@@ -30,6 +30,7 @@ import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 
 import java.io.File;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Map;
 
 /** Rest handler which serves the profiler result file from JobManager. */
@@ -58,6 +59,9 @@ public class JobManagerProfilingFileHandler
         String filename =
                 new File(handlerRequest.getPathParameter(ProfilingFileNamePathParameter.class))
                         .getName();
+        if (filename.toLowerCase(Locale.ROOT).endsWith(".inprogress")) {
+            return null;
+        }
         return new File(profilingResultDir, filename);
     }
 }

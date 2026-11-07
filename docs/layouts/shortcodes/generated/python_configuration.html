@@ -93,6 +93,30 @@
             <td>The maximum number of cached write requests for a single Python MapState. The write requests will be flushed to the state backend (managed in the Java operator) when the number of cached write requests exceed this limit. Note that this is an experimental flag and might not be available in future releases.</td>
         </tr>
         <tr>
+            <td><h5>python.memory-profiling.startup.delay</h5></td>
+            <td style="word-wrap: break-word;">0 ms</td>
+            <td>Duration</td>
+            <td>Delay before startup memory capture. Must be non-negative.</td>
+        </tr>
+        <tr>
+            <td><h5>python.memory-profiling.startup.duration</h5></td>
+            <td style="word-wrap: break-word;">1 min</td>
+            <td>Duration</td>
+            <td>Startup memory capture duration. Must be positive and within rest.profiling.duration-max.</td>
+        </tr>
+        <tr>
+            <td><h5>python.memory-profiling.startup.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Record one Memray window per standalone worker start. Requires rest.profiling.enabled and Memray in the worker environment. Files use rest.profiling.dir; startup files are not part of REST history and deployment operators manage retention.</td>
+        </tr>
+        <tr>
+            <td><h5>python.memory-profiling.startup.native</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Include native allocation stacks in the startup memory recording.</td>
+        </tr>
+        <tr>
             <td><h5>python.metric.enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

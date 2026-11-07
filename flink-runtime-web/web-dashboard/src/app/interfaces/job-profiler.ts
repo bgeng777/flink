@@ -28,6 +28,7 @@ export interface ProfilingDetail {
   message: string;
   outputFile: string;
   mode: string | null;
+  type?: 'CPU' | 'MEMORY';
   worker?: PythonWorkerInfo;
   includeIdle?: boolean;
   includeNative?: boolean;
@@ -36,8 +37,19 @@ export interface ProfilingDetail {
 export interface PythonWorkerInfo {
   id: string;
   pid: number;
+  memoryProfilingAvailable: boolean;
+  operators: PythonWorkerOperator[];
+}
+
+export interface PythonWorkerOperator {
+  jobId: string;
+  operatorId: string;
+  operatorName: string;
+  subtaskIndex: number;
+  attemptNumber: number;
 }
 
 export type ProfilingRequest =
   | { mode: string; duration: number }
-  | { workerId: string; duration: number; includeIdle: boolean; includeNative: boolean };
+  | { workerId: string; type: 'CPU'; duration: number; includeIdle: boolean; includeNative: boolean }
+  | { workerId: string; type: 'MEMORY'; duration: number; includeNative: boolean };

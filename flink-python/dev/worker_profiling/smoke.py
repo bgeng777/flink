@@ -79,7 +79,7 @@ def main(directory, include_native=False, include_idle=False):
                 time.sleep(0.1)
             worker = workers[0]
             profile = request(prefix + '/profiler',
-                              {'duration': 2, 'workerId': worker['id'],
+                              {'type': 'CPU', 'duration': 2, 'workerId': worker['id'],
                                'includeIdle': include_idle, 'includeNative': include_native})
             deadline = time.monotonic() + 15
             while profile['status'] == 'RUNNING':
@@ -90,10 +90,11 @@ def main(directory, include_native=False, include_idle=False):
             assert profile.get('includeNative') is include_native, profile
             assert profile.get('includeIdle') is include_idle, profile
             assert profile['worker']['id'] == worker['id'], profile
-            if profile['status'] == 'FINISHED':
-                url = base + prefix + '/profiler/' + profile['outputFile']
-                with urllib.request.urlopen(url, timeout=10) as r:
-                    root.joinpath('worker-flamegraph.svg').write_bytes(r.read())
+            if profile['status'] != 'FINISHED':
+                raise RuntimeError('Profiling failed: %s' % profile)
+            url = base + prefix + '/profiler/' + profile['outputFile']
+            with urllib.request.urlopen(url, timeout=10) as r:
+                root.joinpath('worker-flamegraph.svg').write_bytes(r.read())
             job.wait(timeout=60)
         if job.returncode != 0:
             raise RuntimeError('PyFlink job failed; inspect job.log')

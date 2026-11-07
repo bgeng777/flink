@@ -3296,6 +3296,21 @@ components:
         value:
           type: integer
           format: int32
+    Operator:
+      type: object
+      properties:
+        attemptNumber:
+          type: integer
+          format: int32
+        jobId:
+          type: string
+        operatorId:
+          type: string
+        operatorName:
+          type: string
+        subtaskIndex:
+          type: integer
+          format: int32
     Parallelism:
       type: object
       properties:
@@ -3378,6 +3393,8 @@ components:
         triggerTime:
           type: integer
           format: int64
+        type:
+          $ref: "#/components/schemas/PythonProfilingType"
         worker:
           $ref: "#/components/schemas/PythonWorkerInfo"
     ProfilingInfoList:
@@ -3407,6 +3424,8 @@ components:
           type: boolean
         mode:
           $ref: "#/components/schemas/ProfilingMode"
+        type:
+          $ref: "#/components/schemas/PythonProfilingType"
         workerId:
           type: string
     ProfilingStatus:
@@ -3415,11 +3434,22 @@ components:
       - RUNNING
       - FINISHED
       - FAILED
+    PythonProfilingType:
+      type: string
+      enum:
+      - CPU
+      - MEMORY
     PythonWorkerInfo:
       type: object
       properties:
         id:
           type: string
+        memoryProfilingAvailable:
+          type: boolean
+        operators:
+          type: array
+          items:
+            $ref: "#/components/schemas/Operator"
         pid:
           type: integer
           format: int64

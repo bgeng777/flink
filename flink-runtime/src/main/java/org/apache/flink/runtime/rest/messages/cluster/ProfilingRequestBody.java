@@ -57,6 +57,20 @@ public class ProfilingRequestBody implements RequestBody, Serializable {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private final Boolean includeNative;
 
+    @JsonProperty("type")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private ProfilingInfo.PythonProfilingType type;
+
+    @JsonIgnore
+    public ProfilingInfo.PythonProfilingType getType() {
+        return type;
+    }
+
+    @JsonIgnore
+    public boolean hasIncludeIdle() {
+        return includeIdle != null;
+    }
+
     public ProfilingRequestBody(ProfilingInfo.ProfilingMode mode, int duration) {
         this(mode, duration, null, null, null);
     }
@@ -70,6 +84,7 @@ public class ProfilingRequestBody implements RequestBody, Serializable {
         this.mode = mode;
         this.duration = duration;
         this.workerId = workerId;
+        this.type = workerId == null ? null : ProfilingInfo.PythonProfilingType.CPU;
         this.includeIdle = includeIdle;
         this.includeNative = includeNative;
     }
@@ -80,19 +95,25 @@ public class ProfilingRequestBody implements RequestBody, Serializable {
             @JsonProperty(FIELD_NAME_DURATION) JsonNode duration,
             @JsonProperty("workerId") JsonNode workerId,
             @JsonProperty("includeIdle") JsonNode includeIdle,
-            @JsonProperty("includeNative") JsonNode includeNative) {
+            @JsonProperty("includeNative") JsonNode includeNative,
+            @JsonProperty("type") JsonNode type) {
         checkArgument(
                 duration != null && duration.isIntegralNumber() && duration.canConvertToInt(),
                 "duration must be an integer number of seconds.");
         checkArgument(
                 workerId == null || workerId.isNull() || workerId.isTextual(),
                 "workerId must be a string.");
-        return new ProfilingRequestBody(
-                mode,
-                duration.intValue(),
-                workerId == null || workerId.isNull() ? null : workerId.textValue(),
-                parseBoolean(includeIdle, "includeIdle"),
-                parseBoolean(includeNative, "includeNative"));
+        final ProfilingRequestBody result =
+                new ProfilingRequestBody(
+                        mode,
+                        duration.intValue(),
+                        workerId == null || workerId.isNull() ? null : workerId.textValue(),
+                        parseBoolean(includeIdle, "includeIdle"),
+                        parseBoolean(includeNative, "includeNative"));
+        checkArgument(type == null || type.isTextual(), "type must be CPU or MEMORY.");
+        result.type =
+                type == null ? null : ProfilingInfo.PythonProfilingType.valueOf(type.textValue());
+        return result;
     }
 
     private static Boolean parseBoolean(JsonNode value, String name) {
@@ -125,7 +146,7 @@ public class ProfilingRequestBody implements RequestBody, Serializable {
 
     @JsonIgnore
     public boolean hasPythonOptions() {
-        return includeIdle != null || includeNative != null;
+        return type != null || includeIdle != null || includeNative != null;
     }
 
     @JsonIgnore

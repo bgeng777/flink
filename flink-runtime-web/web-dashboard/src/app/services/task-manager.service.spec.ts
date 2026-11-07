@@ -225,14 +225,20 @@ describe('TaskManagerService', () => {
   });
 
   it('loads registered Python workers from the routed TaskManager', async () => {
-    const workers = [{ id: 'registered', pid: 123 }];
+    const workers = [{ id: 'registered', pid: 123, memoryProfilingAvailable: false, operators: [] }];
     httpClient.get.mockReturnValue(of({ workers }));
     expect(await firstValueFrom(service.loadPythonWorkers('tm-1'))).toEqual(workers);
     expect(httpClient.get).toHaveBeenCalledWith(`${configService.BASE_URL}/taskmanagers/tm-1/python-workers`);
   });
 
   it('posts Python options to the existing profiler endpoint without a JVM mode', async () => {
-    const request = { workerId: 'registered', duration: 10, includeNative: true, includeIdle: false };
+    const request = {
+      workerId: 'registered',
+      type: 'CPU' as const,
+      duration: 10,
+      includeNative: true,
+      includeIdle: false
+    };
     httpClient.post.mockReturnValue(of({ status: 'RUNNING' }));
     await firstValueFrom(service.createProfilingInstance('tm-1', request));
     expect(httpClient.post).toHaveBeenCalledWith(`${configService.BASE_URL}/taskmanagers/tm-1/profiler`, request);

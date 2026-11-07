@@ -43,6 +43,7 @@ class PythonWorkerProfiler {
     private static final long MAX_OUTPUT_BYTES = 20 * 1024 * 1024;
     private static final Pattern SAMPLES = Pattern.compile("\\bSamples: [1-9][0-9]*\\b");
     private static final long MAX_LOG_BYTES = 1024 * 1024;
+    private static final long FINALIZATION_TIMEOUT_SECONDS = 10;
     private final PythonWorkerRegistry registry;
     private final Worker worker;
     private final String executable;
@@ -112,11 +113,20 @@ class PythonWorkerProfiler {
                             .redirectErrorStream(true)
                             .redirectOutput(log.toFile())
                             .start();
-            final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(duration + 5);
+            // py-spy's duration counts sampling intervals, which can overrun with slow unwinding.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(duration);
+            boolean stopRequested = false;
             while (!process.waitFor(100, TimeUnit.MILLISECONDS)) {
                 checkWorker();
                 if (System.nanoTime() >= deadline) {
-                    throw new IOException("Python sampler exceeded its deadline");
+                    if (stopRequested) {
+                        throw new IOException("Python sampler exceeded its finalization deadline");
+                    }
+                    stopSampling(process);
+                    stopRequested = true;
+                    deadline =
+                            System.nanoTime()
+                                    + TimeUnit.SECONDS.toNanos(FINALIZATION_TIMEOUT_SECONDS);
                 }
                 checkOutputSize(output, log);
             }
@@ -156,6 +166,28 @@ class PythonWorkerProfiler {
                     deleteResult(output);
                 }
                 deleteResult(log);
+            }
+        }
+    }
+
+    private void stopSampling(Process process) throws IOException, InterruptedException {
+        if (!process.isAlive()) {
+            return;
+        }
+        final Process signal =
+                new ProcessBuilder("/bin/kill", "-INT", Long.toString(process.pid()))
+                        .redirectErrorStream(true)
+                        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                        .start();
+        try {
+            if (!signal.waitFor(1, TimeUnit.SECONDS)
+                    || (signal.exitValue() != 0 && process.isAlive())) {
+                throw new IOException("Could not interrupt Python sampler");
+            }
+        } finally {
+            if (signal.isAlive()) {
+                signal.destroyForcibly();
+                signal.waitFor(1, TimeUnit.SECONDS);
             }
         }
     }

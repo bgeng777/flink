@@ -27,9 +27,11 @@ from threading import Event, Thread
 import time
 import uuid
 
+from pyflink.fn_execution._worker_profiling import finish_startup_memory_capture
+
 
 @contextmanager
-def profile_worker_memory():
+def profile_worker_memory(registration=None):
     directory = os.environ.get('PYFLINK_MEMRAY_OUTPUT_DIR')
     if not directory:
         logging.info('Python worker Memray capture is disabled')
@@ -37,12 +39,16 @@ def profile_worker_memory():
         return
 
     try:
+        if os.environ.get('PYFLINK_MEMRAY_CPROFILE') == 'true':
+            raise ValueError('Memray and cProfile cannot run concurrently in the same worker')
         delay = float(os.environ.get('PYFLINK_MEMRAY_DELAY', '0'))
         duration = float(os.environ.get('PYFLINK_MEMRAY_DURATION', '60'))
         if not math.isfinite(delay) or delay < 0:
             raise ValueError('PYFLINK_MEMRAY_DELAY must be finite and non-negative')
         if not math.isfinite(duration) or duration <= 0:
             raise ValueError('PYFLINK_MEMRAY_DURATION must be finite and positive')
+        if duration > float(os.environ.get('PYFLINK_MEMRAY_MAX_DURATION', '300')):
+            raise ValueError('Memory capture duration exceeds rest.profiling.duration-max')
         native = os.environ.get('PYFLINK_MEMRAY_NATIVE_TRACES', 'false').lower()
         if native not in ('true', 'false'):
             raise ValueError('PYFLINK_MEMRAY_NATIVE_TRACES must be true or false')
@@ -51,9 +57,10 @@ def profile_worker_memory():
 
         root = Path(directory).resolve()
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        capture = root / ('worker-%s-%s.bin' % (os.getpid(), uuid.uuid4().hex))
+        capture = root / ('python-memory-startup-%s-%s.bin' % (os.getpid(), uuid.uuid4().hex))
     except (ImportError, OSError, ValueError):
         logging.warning('Could not prepare Python worker Memray capture', exc_info=True)
+        finish_startup_memory_capture(registration)
         yield
         return
 
@@ -63,6 +70,7 @@ def profile_worker_memory():
     def record():
         try:
             if stop.wait(delay):
+                finish_startup_memory_capture(registration)
                 logging.info('Python worker Memray capture cancelled before starting: %s', capture)
                 return
             pending = capture.with_suffix('.bin.inprogress')
@@ -74,6 +82,7 @@ def profile_worker_memory():
                 ready.set()
                 stop.wait(duration)
             # Only publish a completed artifact after Tracker has flushed and closed it.
+            finish_startup_memory_capture(registration)
             pending.replace(capture)
             logging.info('Python worker Memray capture completed: pid=%s, ended_at=%s, file=%s',
                          os.getpid(), time.time(), capture)
@@ -89,6 +98,7 @@ def profile_worker_memory():
     try:
         recorder.start()
     except RuntimeError:
+        finish_startup_memory_capture(registration)
         logging.warning('Could not start Python worker Memray capture', exc_info=True)
         yield
         return

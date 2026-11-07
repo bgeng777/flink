@@ -1106,6 +1106,10 @@
         },
         "includeNative" : {
           "type" : "boolean"
+        },
+        "type" : {
+          "type" : "string",
+          "enum" : [ "CPU", "MEMORY" ]
         }
       }
     },
@@ -1140,6 +1144,10 @@
           "type" : "string",
           "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
         },
+        "type" : {
+          "type" : "string",
+          "enum" : [ "CPU", "MEMORY" ]
+        },
         "worker" : {
           "type" : "object",
           "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
@@ -1149,6 +1157,33 @@
             },
             "pid" : {
               "type" : "integer"
+            },
+            "memoryProfilingAvailable" : {
+              "type" : "boolean"
+            },
+            "operators" : {
+              "type" : "array",
+              "items" : {
+                "type" : "object",
+                "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+                "properties" : {
+                  "jobId" : {
+                    "type" : "string"
+                  },
+                  "operatorId" : {
+                    "type" : "string"
+                  },
+                  "operatorName" : {
+                    "type" : "string"
+                  },
+                  "subtaskIndex" : {
+                    "type" : "integer"
+                  },
+                  "attemptNumber" : {
+                    "type" : "integer"
+                  }
+                }
+              }
             }
           }
         },
@@ -1212,6 +1247,10 @@
                 "type" : "string",
                 "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
               },
+              "type" : {
+                "type" : "string",
+                "enum" : [ "CPU", "MEMORY" ]
+              },
               "worker" : {
                 "type" : "object",
                 "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
@@ -1221,6 +1260,33 @@
                   },
                   "pid" : {
                     "type" : "integer"
+                  },
+                  "memoryProfilingAvailable" : {
+                    "type" : "boolean"
+                  },
+                  "operators" : {
+                    "type" : "array",
+                    "items" : {
+                      "type" : "object",
+                      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+                      "properties" : {
+                        "jobId" : {
+                          "type" : "string"
+                        },
+                        "operatorId" : {
+                          "type" : "string"
+                        },
+                        "operatorName" : {
+                          "type" : "string"
+                        },
+                        "subtaskIndex" : {
+                          "type" : "integer"
+                        },
+                        "attemptNumber" : {
+                          "type" : "integer"
+                        }
+                      }
+                    }
                   }
                 }
               },
@@ -5566,6 +5632,10 @@
         },
         "includeNative" : {
           "type" : "boolean"
+        },
+        "type" : {
+          "type" : "string",
+          "enum" : [ "CPU", "MEMORY" ]
         }
       }
     },
@@ -5600,6 +5670,10 @@
           "type" : "string",
           "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
         },
+        "type" : {
+          "type" : "string",
+          "enum" : [ "CPU", "MEMORY" ]
+        },
         "worker" : {
           "type" : "object",
           "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
@@ -5609,6 +5683,33 @@
             },
             "pid" : {
               "type" : "integer"
+            },
+            "memoryProfilingAvailable" : {
+              "type" : "boolean"
+            },
+            "operators" : {
+              "type" : "array",
+              "items" : {
+                "type" : "object",
+                "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+                "properties" : {
+                  "jobId" : {
+                    "type" : "string"
+                  },
+                  "operatorId" : {
+                    "type" : "string"
+                  },
+                  "operatorName" : {
+                    "type" : "string"
+                  },
+                  "subtaskIndex" : {
+                    "type" : "integer"
+                  },
+                  "attemptNumber" : {
+                    "type" : "integer"
+                  }
+                }
+              }
             }
           }
         },
@@ -5677,6 +5778,10 @@
                 "type" : "string",
                 "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
               },
+              "type" : {
+                "type" : "string",
+                "enum" : [ "CPU", "MEMORY" ]
+              },
               "worker" : {
                 "type" : "object",
                 "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
@@ -5686,6 +5791,33 @@
                   },
                   "pid" : {
                     "type" : "integer"
+                  },
+                  "memoryProfilingAvailable" : {
+                    "type" : "boolean"
+                  },
+                  "operators" : {
+                    "type" : "array",
+                    "items" : {
+                      "type" : "object",
+                      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+                      "properties" : {
+                        "jobId" : {
+                          "type" : "string"
+                        },
+                        "operatorId" : {
+                          "type" : "string"
+                        },
+                        "operatorName" : {
+                          "type" : "string"
+                        },
+                        "subtaskIndex" : {
+                          "type" : "integer"
+                        },
+                        "attemptNumber" : {
+                          "type" : "integer"
+                        }
+                      }
+                    }
                   }
                 }
               },
@@ -5732,6 +5864,33 @@
               },
               "pid" : {
                 "type" : "integer"
+              },
+              "memoryProfilingAvailable" : {
+                "type" : "boolean"
+              },
+              "operators" : {
+                "type" : "array",
+                "items" : {
+                  "type" : "object",
+                  "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo:Operator",
+                  "properties" : {
+                    "jobId" : {
+                      "type" : "string"
+                    },
+                    "operatorId" : {
+                      "type" : "string"
+                    },
+                    "operatorName" : {
+                      "type" : "string"
+                    },
+                    "subtaskIndex" : {
+                      "type" : "integer"
+                    },
+                    "attemptNumber" : {
+                      "type" : "integer"
+                    }
+                  }
+                }
               }
             }
           }

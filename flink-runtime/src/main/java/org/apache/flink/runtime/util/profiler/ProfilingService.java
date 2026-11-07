@@ -48,6 +48,7 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -178,11 +179,78 @@ public class ProfilingService implements Closeable {
         return CompletableFuture.completedFuture(info);
     }
 
-    /** Cancels this TaskManager's Python capture and completes after sampler cleanup. */
+    public synchronized CompletableFuture<ProfilingInfo> requestPythonMemoryProfiling(
+            String resourceID,
+            long duration,
+            Worker worker,
+            PythonWorkerRegistry registry,
+            String executable,
+            boolean includeNative) {
+        if (profilingFuture != null && !profilingFuture.isDone()) {
+            return FutureUtils.completedExceptionally(
+                    new IllegalStateException("A profiling session is active in this Flink JVM"));
+        }
+        final ProfilingInfo info =
+                ProfilingInfo.createPython(duration, worker.toInfo(), false, includeNative);
+        info.setType(ProfilingInfo.PythonProfilingType.MEMORY);
+        profilingMap.computeIfAbsent(resourceID, ignored -> new ArrayDeque<>()).addFirst(info);
+        rollingClearing(profilingMap.get(resourceID));
+        final Optional<ProcessHandle> workerHandle = ProcessHandle.of(worker.getPid());
+        final PythonWorkerMemoryProfiler profiler =
+                new PythonWorkerMemoryProfiler(
+                        registry,
+                        worker,
+                        executable,
+                        Paths.get(profilingResultDir),
+                        duration,
+                        includeNative);
+        final CompletableFuture<Void> completion = new CompletableFuture<>();
+        pythonProfilingResourceID = resourceID;
+        pythonProfilingCompletion = completion;
+        profilingFuture = new ProfilingFuture(completion, profiler::cancel);
+        scheduledExecutor.execute(
+                () -> {
+                    try {
+                        final String file = profiler.profile();
+                        synchronized (this) {
+                            info.success(file);
+                        }
+                    } catch (Exception error) {
+                        if (error instanceof InterruptedException) {
+                            Thread.currentThread().interrupt();
+                        }
+                        synchronized (this) {
+                            info.fail(
+                                    "Python memory profiling failed: "
+                                            + error.getMessage()
+                                            + (profiler.isStopConfirmed()
+                                                    ? ""
+                                                    : "; stop unconfirmed; profiling remains reserved until the worker exits"));
+                        }
+                    } finally {
+                        if (profiler.isStopConfirmed()) {
+                            completion.complete(null);
+                        } else {
+                            workerHandle.ifPresentOrElse(
+                                    handle ->
+                                            handle.onExit()
+                                                    .whenComplete(
+                                                            (ignored, failure) ->
+                                                                    completion.complete(null)),
+                                    () -> completion.complete(null));
+                        }
+                    }
+                });
+        return CompletableFuture.completedFuture(info);
+    }
+
+    /** Cancels this TaskManager's Python capture with a bounded wait for sampler cleanup. */
     public synchronized CompletableFuture<Void> cancelPythonProfiling(String resourceID) {
         if (resourceID.equals(pythonProfilingResourceID) && !pythonProfilingCompletion.isDone()) {
             profilingFuture.cancel();
-            return pythonProfilingCompletion;
+            return pythonProfilingCompletion
+                    .thenApply(ignored -> (Void) null)
+                    .completeOnTimeout(null, 15, TimeUnit.SECONDS);
         }
         return FutureUtils.completedVoidFuture();
     }

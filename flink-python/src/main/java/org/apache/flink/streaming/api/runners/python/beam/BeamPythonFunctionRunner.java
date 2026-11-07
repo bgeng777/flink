@@ -49,6 +49,7 @@ import org.apache.beam.model.pipeline.v1.RunnerApi;
 import org.apache.beam.runners.core.TimerInternals;
 import org.apache.beam.runners.fnexecution.control.BundleProgressHandler;
 import org.apache.beam.runners.fnexecution.control.DefaultJobBundleFactory;
+import org.apache.beam.runners.fnexecution.control.FnApiControlClient;
 import org.apache.beam.runners.fnexecution.control.JobBundleFactory;
 import org.apache.beam.runners.fnexecution.control.OutputReceiverFactory;
 import org.apache.beam.runners.fnexecution.control.RemoteBundle;
@@ -331,6 +332,11 @@ public abstract class BeamPythonFunctionRunner implements PythonFunctionRunner {
                         this, BeamPythonFunctionRunner.class.getSimpleName(), LOG);
 
         unregisteredTimers = Collections.synchronizedList(new LinkedList<>());
+    }
+
+    public String getWorkerId() {
+        return ((FnApiControlClient) stageBundleFactory.getInstructionRequestHandler())
+                .getWorkerId();
     }
 
     @Override

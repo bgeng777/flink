@@ -122,5 +122,5 @@ if __name__ == "__main__":
         from pyflink.fn_execution._worker_profiling import register_worker
         from pyflink.fn_execution._worker_memory_profiling import profile_worker_memory
 
-        with register_worker(), profile_worker_memory():
+        with register_worker() as registration, profile_worker_memory(registration):
             beam_sdk_worker_main.main()

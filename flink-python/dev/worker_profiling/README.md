@@ -20,54 +20,38 @@ under the License.
 # Python worker profiling: local integration
 
 The revised design ([English](FLIP-draft.en.md), [中文](FLIP-draft.md)) reuses Flink's existing profiling service,
-REST/RM/TM route, history, concurrency limit and BLOB download. The additional
-runtime responsibilities are worker discovery and py-spy execution. This is a local
+REST/RM/TM route, history, concurrency limit and BLOB download. The current prototype implements worker discovery, py-spy execution, startup Memray capture, and opt-in Memray attach/detach. This is a local
 branch, not an approved/released FLIP.
 
 The design was compared with the local VVR flamegraph implementation on 2026-10-24.
 Optional native-stack capture and a Python target selector in the existing Profiler UI
-are implemented and validated on Linux AArch64. Controlled sampling-overhead measurements remain.
-The design records the reference baseline and adoption decisions in Appendix B.
+are implemented and validated on Linux AArch64. A local CPU ResNet-18 overhead comparison is available; broader isolated-hardware measurements remain.
+The design records the implementation baseline and remaining work in Appendix A.
 
 ## Delivery scope
 
-The [FLIP-format draft](FLIP-draft.en.md) separates the proposed CPU feature from
-the memory experiment in Appendix A. Its Open Questions section lists four
-scope and interface decisions to discuss before finalizing the proposal. The
-proposed community deliverable is CPU profiling; memory remains a separate local
-experiment. The CPU backend is still under review in the
-[cProfile/py-spy study](Profiler-selection-research.md);
-the implementation status below refers to the existing py-spy prototype.
+The revised [English FLIP](FLIP-draft.en.md) and [Chinese FLIP](FLIP-draft.md) include
+CPU profiling and both memory modes in the formal proposal: startup Tracker capture
+and separately enabled, explicitly warned Memray attach. The proposed integration
+reuses existing Flink profiling paths and does not add a worker-control RPC or SPI.
 
-The revised public contracts are implemented: worker descriptors contain only `id` and
-`pid`, default history is JVM-only, and `target=python` selects Python history. Python
-responses omit JVM-only mode fields. Explicit error and result-directory lifecycle
-contracts are covered by tests. See the [2026-11-07 standalone validation](../../../output/playwright/pyflink-20261107/run.md)
-for real Linux captures, environment details, screenshots, and remaining limits.
+The revised configuration, memory REST contract and UI are implemented locally. The earlier
+`PYFLINK_MEMRAY_*` inputs are private transport details, not supported user configuration.
 
-| Work item | Status and acceptance |
+| Work item | Current implementation |
 | --- | --- |
-| CPU flamegraphs with py-spy | Implemented and validated on Linux AArch64, CPython 3.11.18 and py-spy 0.4.3. Ordinary/native captures identify Python preprocessing and zlib deflate. Broader platform and overhead validation remains. |
-| Memory capture at worker startup | Implemented with optional Memray 1.20.0. Immediate and delayed/native captures identify image-buffer and zlib allocations on Linux; the same worker continues processing after closure. See [experiment details](Memory-experiment.md). |
+| CPU profiling | Existing REST/RPC/history/download/UI reused, with explicit `type: CPU`; ordinary/native capture validated on Linux AArch64 with py-spy 0.4.3. |
+| Startup memory capture | Formal Python configuration, Memray Tracker window, shared result directory and download; real configured capture validated. |
+| On-demand memory attach | Separate opt-in flag, worker preparation, UI risk acknowledgment, existing session/history/download path and confirmed-detach publication; real native attach validated with Memray 1.20.0. |
+| Lifecycle | Stale registration reclamation, startup/attach conflict, bounded CLI/debugger cleanup, stop-unconfirmed reservation, and incomplete-file download rejection. |
 
-The memory experiment uses Memray's public Tracker API in the worker and retains
-its binary capture for offline rendering. It requires starting the worker and
-initially targets a selected small diagnostic job. It does not add a memory REST
-endpoint, UI, artifact service or shared admission protocol to Flink.
+The first-release proposal exports a Memray binary for offline flamegraph/stats/tree
+analysis. Startup files share the TM directory/download route but do not enter REST
+history or its retention; this tradeoff is explicit in the FLIP's Open Questions.
 
-Use existing deployment monitoring and worker IDs/PIDs during validation. Process
-metrics, task associations, thread dumps, dynamic memory triggering and recovery
-of interrupted captures are outside these deliverables. They do not block CPU
-submission for community review.
-
-The [Ray/Memray source study](Ray-profiling-research.md) remains reference material.
-The [distributed framework comparison](Distributed-framework-profiling-research.md)
-adds Spark, Dask, Beam/Dataflow, PyTorch and Celery. In-process collection can use
-an existing worker control or execution path; the first memory experiment still
-uses a startup window.
-The [external-attach sequence](memory-lifecycle.png) is an earlier alternative,
-not the current implementation plan. Validation results below apply only to the
-existing py-spy implementation; memory evidence is recorded in the separate experiment report.
+See the [tool selection study](Profiler-selection-research.md),
+[framework comparison](Distributed-framework-profiling-research.md), and
+[Ray source review](Ray-profiling-research.md) for the underlying research.
 
 ## Build and test
 
@@ -113,8 +97,7 @@ or build without `-Pskip-webui-build`.
 The script launches a real process-mode job and discovers its worker through
 **Flink REST**, submits a capture to `/taskmanagers/:id/profiler`, checks the UDF PID
 and four output rows, and writes `result.json`. It downloads an SVG only when Flink
-reports FINISHED. Read the profiling status/message: exit 0 means the experiment
-and job completed, not necessarily that sampling succeeded.
+reports FINISHED. A failed profiling session makes the script fail.
 
 The original pre-integration evidence in `validation.json` used a separate local
 controller and existing 2.3 Java jars; it must not be mistaken for a current-master
@@ -124,7 +107,7 @@ Flink REST smoke test. New integration results are recorded separately below.
 
 ```yaml
 rest.profiling.enabled: true
-rest.python-profiling.executable: /absolute/path/to/py-spy
+rest.python-profiling.cpu.executable: /absolute/path/to/py-spy
 rest.profiling.dir: /flink/log/profiling
 ```
 
@@ -135,12 +118,15 @@ path, new runtime Environment API or operator-owner lease is required.
 ```text
 GET  /taskmanagers/:tm/python-workers
 POST /taskmanagers/:tm/profiler
-     {"workerId": "<returned id>", "duration": 10, "includeIdle": false, "includeNative": false}
+     {"workerId": "<returned id>", "type": "CPU", "duration": 10, "includeIdle": false, "includeNative": false}
 GET  /taskmanagers/:tm/profiler?target=python
 GET  /taskmanagers/:tm/profiler/:filename
 ```
 
-`id` is an opaque process-instance handle; `pid` is display metadata. Beam IDs and
+`id` is an opaque process-instance handle; `pid` is display metadata.
+`memoryProfilingAvailable` indicates whether the worker was prepared for attach.
+Memory requests use `type: MEMORY`, omit `includeIdle`, and download a Memray binary.
+See [memory deployment and API instructions](Memory-experiment.md). Beam IDs and
 start tokens remain internal.
 JVM requests keep `{mode, duration}`. Python requests and responses omit JVM modes.
 Default history queries return JVM sessions; `target=python` selects Python sessions. Both use the
@@ -149,11 +135,42 @@ Capture rate is fixed at 50 Hz. The TaskManager Profiler tab now selects JVM or 
 lists workers, and offers native/idle checkboxes. A sole worker is selected on entering Python
 mode; multiple workers require a choice. An exited selection is cleared, never silently
 replaced with another process. History shows the target PID and requested sampling mode.
-Full operator ownership remains deferred.
+Worker entries include an `operators` list with job ID, operator ID/name, subtask index and attempt
+number. The selector shows operator names and attempts alongside the PID. Java operator open/close
+updates association records; discovery joins them to Python's existing Beam worker ID, scoped by
+JobID. Shared workers list all associated operators; reports still describe the whole process.
 
 ## Evidence and limitations
 
-Latest validation (2026-11-07):
+Latest revision validation (2026-11-07):
+
+- One TM/one slot with Python managed memory disabled and two unfused operators produces two
+  workers. Operator metadata matches independent UDF PID records; targeted CPU captures exclude
+  the other operator's hotspot, and Memray records the selected PID/allocation stack. With managed
+  memory enabled, one worker lists both operators and captures both hotspots. Cancellation removes
+  association records, expired handles return 404, and overlapping requests return 409.
+  See the [single-TM report and screenshots](../../../output/playwright/pyflink-20261107/single-tm-workers/run.md).
+
+- 73 targeted runtime tests, 16 Python memory tests, 8 Python environment-manager tests and
+  37 frontend tests pass. The REST stability snapshot, generated config/REST documentation,
+  Java format/Checkstyle and changed-file Python/frontend lint checks pass.
+- The native Memray attach and formally configured startup capture finish on the dedicated
+  standalone cluster. Both produce readable allocation records; downloaded bytes match local
+  files, known allocation stacks appear, and the jobs remain running after capture.
+- Inherited legacy environment inputs do not bypass the disabled startup option. Incomplete-file
+  download tests cover both JM/TM endpoints, encoded trailing slashes and case variants.
+- A subsequent 6 GiB VM run used two TMs and two workers. Both image-buffer and ResNet-18 jobs
+  passed simultaneous captures, cross-TM isolation, same-TM conflicts and matching downloads.
+- Three-round ResNet-18 comparisons with native pools limited to one and default six threads
+  record throughput, UDF latency and native-thread visibility. The native CPU timeout found by
+  this experiment was fixed with timed SIGINT and bounded finalization, then verified via REST.
+  See the [experiment report](../../../output/playwright/pyflink-20261107/torch-multiworker/run.md)
+  for raw evidence, calibration, environmental failures and the distinction between overhead
+  measurements before the stop fix and its later completion test.
+
+See the [formal-memory report](../../../output/playwright/pyflink-20261107/formal-memory/run.md).
+The following CPU and startup baseline checks were completed before this revision:
+
 
 - 69 runtime tests pass, including the TaskExecutor suite, real REST/RPC/download integration, 400/404/409/503,
   typed request validation, internal identity isolation, zero samples, output-directory failures,

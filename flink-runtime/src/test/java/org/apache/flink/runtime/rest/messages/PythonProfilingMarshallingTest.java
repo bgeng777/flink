@@ -27,6 +27,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -50,7 +52,7 @@ class PythonProfilingMarshallingTest {
     void carriesPythonTargetOverRestAndRpc() throws Exception {
         final ProfilingRequestBody request =
                 mapper.readValue(
-                        "{\"workerId\":\"abc\",\"duration\":10,\"includeIdle\":true,\"includeNative\":true}",
+                        "{\"type\":\"CPU\",\"workerId\":\"abc\",\"duration\":10,\"includeIdle\":true,\"includeNative\":true}",
                         ProfilingRequestBody.class);
         assertThat(request.getMode()).isNull();
         assertThat(request.getWorkerId()).isEqualTo("abc");
@@ -77,14 +79,20 @@ class PythonProfilingMarshallingTest {
 
     @Test
     void roundTripsPythonResponseMetadata() throws Exception {
+        final PythonWorkerInfo.Operator operator =
+                new PythonWorkerInfo.Operator("job", "operator", "infer-images", 2, 1);
         final ProfilingInfo info =
-                ProfilingInfo.createPython(10, new PythonWorkerInfo("id", 123), true, true);
+                ProfilingInfo.createPython(
+                        10,
+                        new PythonWorkerInfo("id", 123, false, Collections.singletonList(operator)),
+                        true,
+                        true);
         info.success("python-test.svg");
         final JsonNode responseJson = mapper.readTree(mapper.writeValueAsString(info));
         assertThat(responseJson.has("mode")).isFalse();
         assertThat(responseJson.has("profilingMode")).isFalse();
         final JsonNode workerJson = responseJson.path("worker");
-        assertThat(workerJson.size()).isEqualTo(2);
+        assertThat(workerJson.size()).isEqualTo(4);
         assertThat(workerJson.has("beamWorkerId")).isFalse();
         assertThat(workerJson.has("startToken")).isFalse();
         final ProfilingInfo decoded =
@@ -92,6 +100,10 @@ class PythonProfilingMarshallingTest {
                         .readValue(mapper.writeValueAsString(info), ProfilingInfo.class);
         assertThat(decoded.getWorker().getPid()).isEqualTo(123);
         assertThat(decoded.getWorker().getId()).isEqualTo("id");
+        assertThat(decoded.getWorker().getOperators())
+                .singleElement()
+                .usingRecursiveComparison()
+                .isEqualTo(operator);
         assertThat(decoded.getIncludeIdle()).isTrue();
         assertThat(decoded.getIncludeNative()).isTrue();
         assertThat(decoded.getProfilingMode()).isNull();

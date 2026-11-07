@@ -57,6 +57,27 @@ public class ProfilingInfo implements ResponseBody, Serializable {
     @JsonProperty(FIELD_NAME_OUTPUT_FILE)
     private String outputFile;
 
+    /** Python capture type; JVM requests continue using ProfilingMode. */
+    public enum PythonProfilingType {
+        CPU,
+        MEMORY
+    }
+
+    @JsonProperty("type")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private PythonProfilingType type;
+
+    public PythonProfilingType getType() {
+        return type;
+    }
+
+    public void setType(PythonProfilingType type) {
+        this.type = type;
+        if (type == PythonProfilingType.MEMORY) {
+            this.includeIdle = null;
+        }
+    }
+
     @JsonProperty("worker")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private PythonWorkerInfo worker;
@@ -85,6 +106,7 @@ public class ProfilingInfo implements ResponseBody, Serializable {
             long duration, PythonWorkerInfo worker, boolean includeIdle, boolean includeNative) {
         ProfilingInfo info = create(duration, null);
         info.worker = worker;
+        info.type = PythonProfilingType.CPU;
         info.includeIdle = includeIdle;
         info.includeNative = includeNative;
         return info;

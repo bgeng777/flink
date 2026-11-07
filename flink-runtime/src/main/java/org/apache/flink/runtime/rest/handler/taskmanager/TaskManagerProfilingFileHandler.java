@@ -24,6 +24,7 @@ import org.apache.flink.runtime.blob.TransientBlobService;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerGateway;
 import org.apache.flink.runtime.rest.handler.HandlerRequest;
+import org.apache.flink.runtime.rest.handler.RestHandlerException;
 import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
 import org.apache.flink.runtime.rest.messages.ProfilingFileNamePathParameter;
 import org.apache.flink.runtime.rest.messages.UntypedResponseMessageHeaders;
@@ -33,10 +34,16 @@ import org.apache.flink.runtime.taskexecutor.TaskExecutor;
 import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 
+import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandlerContext;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpRequest;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
+
 import javax.annotation.Nonnull;
 
+import java.io.File;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -66,7 +73,30 @@ public class TaskManagerProfilingFileHandler
     }
 
     @Override
+    protected CompletableFuture<Void> respondToRequest(
+            ChannelHandlerContext ctx,
+            HttpRequest httpRequest,
+            HandlerRequest<EmptyRequestBody> handlerRequest,
+            RestfulGateway gateway)
+            throws RestHandlerException {
+        if (getFileName(handlerRequest).toLowerCase(Locale.ROOT).endsWith(".inprogress")) {
+            throw new RestHandlerException(
+                    "Profiling result is incomplete", HttpResponseStatus.NOT_FOUND);
+        }
+        return super.respondToRequest(ctx, httpRequest, handlerRequest, gateway);
+    }
+
+    @Override
     protected Map<String, String> getFileResponseHeaders(String filename) {
+        if (filename.endsWith(".bin")) {
+            return Map.of(
+                    "Content-Type",
+                    "application/octet-stream",
+                    "Content-Disposition",
+                    "attachment",
+                    "X-Content-Type-Options",
+                    "nosniff");
+        }
         if (!filename.endsWith(".svg")) {
             return Collections.emptyMap();
         }
@@ -90,6 +120,7 @@ public class TaskManagerProfilingFileHandler
 
     @Override
     protected String getFileName(HandlerRequest<EmptyRequestBody> handlerRequest) {
-        return handlerRequest.getPathParameter(ProfilingFileNamePathParameter.class);
+        return new File(handlerRequest.getPathParameter(ProfilingFileNamePathParameter.class))
+                .getName();
     }
 }
