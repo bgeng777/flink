@@ -22,6 +22,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerGateway;
+import org.apache.flink.runtime.resourcemanager.exceptions.UnknownTaskExecutorException;
 import org.apache.flink.runtime.rest.handler.HandlerRequest;
 import org.apache.flink.runtime.rest.handler.RestHandlerException;
 import org.apache.flink.runtime.rest.handler.resourcemanager.AbstractResourceManagerHandler;
@@ -33,13 +34,18 @@ import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerMessagePara
 import org.apache.flink.runtime.taskexecutor.TaskExecutor;
 import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
+import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.concurrent.FutureUtils;
+
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
 
 import javax.annotation.Nonnull;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 /** Rest handler which serves the profiling service from a {@link TaskExecutor}. */
 public class TaskManagerProfilingHandler
@@ -72,7 +78,26 @@ public class TaskManagerProfilingHandler
             throws RestHandlerException {
         ProfilingRequestBody profilingRequest = request.getRequestBody();
         int duration = profilingRequest.getDuration();
+        if ((profilingRequest.getWorkerId() == null && profilingRequest.getMode() == null)
+                || (profilingRequest.getWorkerId() != null && profilingRequest.getMode() != null)
+                || (profilingRequest.getWorkerId() == null
+                        && profilingRequest.hasPythonOptions())) {
+            throw new RestHandlerException(
+                    "Specify a JVM mode or a Python workerId; includeIdle and includeNative are Python-only.",
+                    HttpResponseStatus.BAD_REQUEST);
+        }
+        if (profilingRequest.getWorkerId() != null && profilingRequest.getWorkerId().isBlank()) {
+            throw new RestHandlerException(
+                    "workerId must not be empty.", HttpResponseStatus.BAD_REQUEST);
+        }
         if (duration <= 0 || duration > maxDurationInSeconds) {
+            if (profilingRequest.getWorkerId() != null) {
+                throw new RestHandlerException(
+                        "duration must be positive and no greater than "
+                                + maxDurationInSeconds
+                                + " seconds.",
+                        HttpResponseStatus.BAD_REQUEST);
+            }
             return FutureUtils.completedExceptionally(
                     new IllegalArgumentException(
                             String.format(
@@ -80,7 +105,36 @@ public class TaskManagerProfilingHandler
                                     maxDurationInSeconds)));
         }
         final ResourceID taskManagerId = request.getPathParameter(TaskManagerIdPathParameter.class);
-        return gateway.requestProfiling(
-                taskManagerId, duration, profilingRequest.getMode(), getTimeout());
+        return gateway.requestProfiling(taskManagerId, profilingRequest, getTimeout())
+                .exceptionally(
+                        error -> {
+                            final Throwable cause = ExceptionUtils.stripCompletionException(error);
+                            if (profilingRequest.getWorkerId() == null) {
+                                throw new CompletionException(cause);
+                            }
+                            if (cause instanceof UnsupportedOperationException) {
+                                throw new CompletionException(
+                                        new RestHandlerException(
+                                                cause.getMessage(),
+                                                HttpResponseStatus.SERVICE_UNAVAILABLE,
+                                                cause));
+                            }
+                            if (cause instanceof IllegalStateException) {
+                                throw new CompletionException(
+                                        new RestHandlerException(
+                                                cause.getMessage(),
+                                                HttpResponseStatus.CONFLICT,
+                                                cause));
+                            }
+                            if (cause instanceof NoSuchElementException
+                                    || cause instanceof UnknownTaskExecutorException) {
+                                throw new CompletionException(
+                                        new RestHandlerException(
+                                                cause.getMessage(),
+                                                HttpResponseStatus.NOT_FOUND,
+                                                cause));
+                            }
+                            throw new CompletionException(cause);
+                        });
     }
 }

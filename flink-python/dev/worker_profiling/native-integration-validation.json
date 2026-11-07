@@ -1,0 +1,60 @@
+{
+  "flink_version": "2.4-SNAPSHOT",
+  "base_commit": "8d01380ff5bf9892462ef9808b1b56fd9723f54d",
+  "source": "local implementation; clean distribution rebuild verified for includeNative",
+  "scenario": "native request on macOS, unsupported platform reported without fallback",
+  "real_native_flamegraphs": 0,
+  "sampling_overhead_measured": false,
+  "backend": "Flink REST/RM/TM",
+  "worker": {
+    "id": "95f627c6772d4eea8c7fe03d2bdc5db7",
+    "beamWorkerId": "1-1",
+    "pid": 83633,
+    "startToken": "Sat Oct 24 01:55:02 2026"
+  },
+  "profile": {
+    "status": "FAILED",
+    "mode": null,
+    "triggerTime": 1792778103989,
+    "finishedTime": 1792778104235,
+    "duration": 2,
+    "message": "Python profiling failed: py-spy exited with code 1: Collecting stack traces from native extensions (`--native`) is not supported on your platform.\n",
+    "outputFile": null,
+    "profilingMode": null,
+    "worker": {
+      "id": "95f627c6772d4eea8c7fe03d2bdc5db7",
+      "beamWorkerId": "1-1",
+      "pid": 83633,
+      "startToken": "Sat Oct 24 01:55:02 2026"
+    },
+    "includeIdle": false,
+    "includeNative": true
+  },
+  "job": {
+    "client_pid": 83547,
+    "rows": [
+      [
+        83633,
+        1,
+        41541750
+      ],
+      [
+        83633,
+        2,
+        41541750
+      ],
+      [
+        83633,
+        3,
+        41541750
+      ],
+      [
+        83633,
+        4,
+        41541750
+      ]
+    ]
+  },
+  "worker_pid_verified": true,
+  "worker_exited": true
+}

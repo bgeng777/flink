@@ -119,5 +119,8 @@ if __name__ == "__main__":
             exit(0)
 
         from pyflink.fn_execution.beam import beam_sdk_worker_main
+        from pyflink.fn_execution._worker_profiling import register_worker
+        from pyflink.fn_execution._worker_memory_profiling import profile_worker_memory
 
-        beam_sdk_worker_main.main()
+        with register_worker(), profile_worker_memory():
+            beam_sdk_worker_main.main()

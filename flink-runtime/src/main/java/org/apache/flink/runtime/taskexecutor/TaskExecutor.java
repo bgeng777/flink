@@ -24,6 +24,7 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.BatchExecutionOptions;
 import org.apache.flink.configuration.ClusterOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.configuration.ThreadDumpMode;
 import org.apache.flink.management.jmx.JMXService;
 import org.apache.flink.runtime.accumulators.AccumulatorSnapshot;
@@ -96,7 +97,9 @@ import org.apache.flink.runtime.resourcemanager.ResourceManagerId;
 import org.apache.flink.runtime.resourcemanager.TaskExecutorRegistration;
 import org.apache.flink.runtime.rest.messages.LogInfo;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.ThreadDumpInfo;
+import org.apache.flink.runtime.rest.messages.cluster.ProfilingRequestBody;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.RpcEndpoint;
 import org.apache.flink.runtime.rpc.RpcService;
@@ -142,6 +145,7 @@ import org.apache.flink.runtime.taskmanager.TaskManagerActions;
 import org.apache.flink.runtime.taskmanager.UnresolvedTaskManagerLocation;
 import org.apache.flink.runtime.util.GroupCache;
 import org.apache.flink.runtime.util.profiler.ProfilingService;
+import org.apache.flink.runtime.util.profiler.PythonWorkerRegistry;
 import org.apache.flink.runtime.webmonitor.threadinfo.ThreadInfoSamplesRequest;
 import org.apache.flink.types.SerializableOptional;
 import org.apache.flink.util.CollectionUtil;
@@ -151,6 +155,7 @@ import org.apache.flink.util.FlinkExpectedException;
 import org.apache.flink.util.JobMdcRegistry;
 import org.apache.flink.util.MdcUtils;
 import org.apache.flink.util.MdcUtils.MdcCloseable;
+import org.apache.flink.util.OperatingSystem;
 import org.apache.flink.util.OptionalConsumer;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.SerializedValue;
@@ -319,6 +324,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
             shuffleDescriptorsCache;
 
     private final ProfilingService profilingService;
+    private final PythonWorkerRegistry pythonWorkerRegistry;
 
     private final Set<JobID> jobPartitionToCleanupSet = new HashSet<>();
 
@@ -394,6 +400,15 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
         this.threadInfoSampleService = new ThreadInfoSampleService(sampleExecutor);
         this.profilingService =
                 ProfilingService.getInstance(taskManagerConfiguration.getConfiguration());
+        this.pythonWorkerRegistry =
+                new PythonWorkerRegistry(taskManagerConfiguration.getTmpWorkingDirectory());
+        log.info(
+                "Python worker profiling enabled: {}, executable: {}, result directory: {}, sampling rate: 50 Hz",
+                isPythonProfilingEnabled(),
+                taskManagerConfiguration
+                        .getConfiguration()
+                        .get(RestOptions.PYTHON_PROFILING_EXECUTABLE),
+                taskManagerConfiguration.getConfiguration().get(RestOptions.PROFILING_RESULT_DIR));
 
         this.slotAllocationSnapshotPersistenceService =
                 taskExecutorServices.getSlotAllocationSnapshotPersistenceService();
@@ -522,6 +537,9 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
     public CompletableFuture<Void> onStop() {
         log.info("Stopping TaskExecutor {}.", getAddress());
 
+        final CompletableFuture<Void> pythonProfilingTerminationFuture =
+                profilingService.cancelPythonProfiling(getResourceID().getResourceIdString());
+
         Throwable jobManagerDisconnectThrowable = null;
 
         FlinkExpectedException cause =
@@ -549,7 +567,12 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
         final Throwable throwableBeforeTasksCompletion = jobManagerDisconnectThrowable;
 
-        return FutureUtils.runAfterwards(taskSlotTable.closeAsync(), this::stopTaskExecutorServices)
+        return FutureUtils.runAfterwards(
+                        FutureUtils.completeAll(
+                                Arrays.asList(
+                                        taskSlotTable.closeAsync(),
+                                        pythonProfilingTerminationFuture)),
+                        this::stopTaskExecutorServices)
                 .handle(
                         (ignored, throwable) -> {
                             handleOnStopException(throwableBeforeTasksCompletion, throwable);
@@ -1529,9 +1552,75 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
     @Override
     public CompletableFuture<ProfilingInfo> requestProfiling(
-            int duration, ProfilingInfo.ProfilingMode mode, Duration timeout) {
-        return profilingService.requestProfiling(
-                getResourceID().getResourceIdString(), duration, mode);
+            ProfilingRequestBody request, Duration timeout) {
+        if (request.getWorkerId() == null) {
+            return profilingService.requestProfiling(
+                    getResourceID().getResourceIdString(),
+                    request.getDuration(),
+                    request.getMode());
+        }
+        if (!isPythonProfilingEnabled()) {
+            return FutureUtils.completedExceptionally(
+                    new UnsupportedOperationException(
+                            "Python profiling requires a supported OS, rest.profiling.enabled and rest.python-profiling.executable"));
+        }
+        return CompletableFuture.supplyAsync(
+                        () -> {
+                            try {
+                                return pythonWorkerRegistry.getWorker(request.getWorkerId());
+                            } catch (IOException e) {
+                                throw new CompletionException(e);
+                            }
+                        },
+                        ioExecutor)
+                .thenComposeAsync(
+                        worker -> {
+                            if (!isRunning()) {
+                                return FutureUtils.completedExceptionally(
+                                        new FlinkExpectedException(
+                                                "The TaskExecutor is shutting down."));
+                            }
+                            return profilingService.requestPythonProfiling(
+                                    getResourceID().getResourceIdString(),
+                                    request.getDuration(),
+                                    worker,
+                                    pythonWorkerRegistry,
+                                    taskManagerConfiguration
+                                            .getConfiguration()
+                                            .get(RestOptions.PYTHON_PROFILING_EXECUTABLE),
+                                    request.isIncludeIdle(),
+                                    request.isIncludeNative());
+                        },
+                        getMainThreadExecutor());
+    }
+
+    private boolean isPythonProfilingEnabled() {
+        return (OperatingSystem.isLinux() || OperatingSystem.isMac())
+                && taskManagerConfiguration.getConfiguration().get(RestOptions.ENABLE_PROFILER)
+                && taskManagerConfiguration
+                        .getConfiguration()
+                        .getOptional(RestOptions.PYTHON_PROFILING_EXECUTABLE)
+                        .isPresent();
+    }
+
+    @Override
+    public CompletableFuture<Collection<PythonWorkerInfo>> requestPythonWorkers(Duration timeout) {
+        if (!isPythonProfilingEnabled()) {
+            return FutureUtils.completedExceptionally(
+                    new UnsupportedOperationException(
+                            "Python profiling requires a supported OS, rest.profiling.enabled and rest.python-profiling.executable"));
+        }
+        return CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        return pythonWorkerRegistry.listWorkers().stream()
+                                .map(PythonWorkerRegistry.Worker::toInfo)
+                                .collect(Collectors.toList());
+                    } catch (IOException e) {
+                        throw new CompletionException(e);
+                    }
+                },
+                ioExecutor);
     }
 
     @Override

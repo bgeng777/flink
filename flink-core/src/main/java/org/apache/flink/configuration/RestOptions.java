@@ -324,6 +324,18 @@ public class RestOptions {
                     .defaultValue(false)
                     .withDescription("Enables the experimental profiler feature.");
 
+    /** Optional executable for profiling standalone Python workers. */
+    @Documentation.Section(Documentation.Sections.EXPERT_REST)
+    public static final ConfigOption<String> PYTHON_PROFILING_EXECUTABLE =
+            key("rest.python-profiling.executable")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Absolute path of an administrator-installed py-spy executable. "
+                                    + "Together with rest.profiling.enabled, enables on-demand profiling "
+                                    + "of standalone Python workers. The TaskManager must have permission "
+                                    + "to inspect these processes. No profiling tool is installed automatically.");
+
     /** Maximum history size of profiling list. */
     @Documentation.Section(Documentation.Sections.EXPERT_REST)
     public static final ConfigOption<Integer> MAX_PROFILING_HISTORY_SIZE =
@@ -331,7 +343,7 @@ public class RestOptions {
                     .intType()
                     .defaultValue(10)
                     .withDescription(
-                            "Maximum profiling history instance to be maintained for JobManager or each TaskManager. "
+                            "Maximum profiling history instance to be maintained for JobManager or each TaskManager. JVM and Python sessions share this limit on a TaskManager. "
                                     + "The oldest instance will be removed on a rolling basis when the history size exceeds this value.");
 
     /** Maximum profiling duration for profiling function. */
@@ -351,5 +363,6 @@ public class RestOptions {
             key("rest.profiling.dir")
                     .stringType()
                     .defaultValue(System.getProperty("java.io.tmpdir"))
-                    .withDescription("Profiling result storing directory.");
+                    .withDescription(
+                            "Local profiling result directory. Python worker results are stored on the hosting TaskManager. History eviction removes the corresponding files; restarting a process does not restore profiling history from this directory.");
 }

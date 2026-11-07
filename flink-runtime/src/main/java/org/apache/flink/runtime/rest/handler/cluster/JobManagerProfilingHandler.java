@@ -32,6 +32,8 @@ import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 import org.apache.flink.util.concurrent.FutureUtils;
 
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
+
 import javax.annotation.Nonnull;
 
 import java.time.Duration;
@@ -64,6 +66,13 @@ public class JobManagerProfilingHandler
             throws RestHandlerException {
         ProfilingRequestBody profilingRequest = request.getRequestBody();
         int duration = profilingRequest.getDuration();
+        if (profilingRequest.getWorkerId() != null
+                || profilingRequest.hasPythonOptions()
+                || profilingRequest.getMode() == null) {
+            throw new RestHandlerException(
+                    "JobManager profiling supports JVM modes only.",
+                    HttpResponseStatus.BAD_REQUEST);
+        }
         if (duration <= 0 || duration > maxDurationInSeconds) {
             return FutureUtils.completedExceptionally(
                     new IllegalArgumentException(

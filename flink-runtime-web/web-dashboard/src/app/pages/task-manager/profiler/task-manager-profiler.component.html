@@ -18,6 +18,38 @@
   <div style="margin-bottom: 10px">
     <form nz-form [nzLayout]="'inline'">
       <nz-form-item>
+        <nz-form-label nzFor="target">Target</nz-form-label>
+        <nz-form-control>
+          <nz-select
+            [ngModel]="target"
+            (ngModelChange)="setTarget($event)"
+            name="target"
+            style="width: 160px"
+          >
+            <nz-option nzValue="JVM" nzLabel="TaskManager JVM"></nz-option>
+            <nz-option nzValue="PYTHON" nzLabel="Python worker"></nz-option>
+          </nz-select>
+        </nz-form-control>
+      </nz-form-item>
+      <nz-form-item *ngIf="target === 'PYTHON'">
+        <nz-form-label nzFor="worker">Worker</nz-form-label>
+        <nz-form-control>
+          <nz-select
+            [(ngModel)]="workerId"
+            name="worker"
+            nzPlaceHolder="Select a Python worker"
+            [nzLoading]="isLoading"
+            style="width: 280px"
+          >
+            <nz-option
+              *ngFor="let worker of pythonWorkers"
+              [nzValue]="worker.id"
+              [nzLabel]="'PID ' + worker.pid + ' (worker ' + worker.id + ')'"
+            ></nz-option>
+          </nz-select>
+        </nz-form-control>
+      </nz-form-item>
+      <nz-form-item>
         <nz-form-label nzFor="duration">Profiling Duration</nz-form-label>
         <nz-form-control>
           <nz-input-number
@@ -31,7 +63,7 @@
           </nz-input-number>
         </nz-form-control>
       </nz-form-item>
-      <nz-form-item>
+      <nz-form-item *ngIf="target === 'JVM'">
         <nz-form-label nzFor="mode">Profiling Mode</nz-form-label>
         <nz-form-control>
           <nz-select
@@ -83,13 +115,29 @@
           </nz-select>
         </nz-form-control>
       </nz-form-item>
+      <nz-form-item *ngIf="target === 'PYTHON'">
+        <nz-form-control>
+          <label
+            nz-checkbox
+            [(ngModel)]="includeNative"
+            name="includeNative"
+            nz-tooltip
+            nzTooltipTitle="Include C/C++ extension stacks. Requires a py-spy build with native profiling support."
+          >
+            Include native stacks
+          </label>
+          <label nz-checkbox [(ngModel)]="includeIdle" name="includeIdle">
+            Include idle threads
+          </label>
+        </nz-form-control>
+      </nz-form-item>
       <nz-form-item>
         <nz-form-control>
           <button
             nz-button
             nzType="primary"
             [nzLoading]="isCreating"
-            [disabled]="duration === null || !isEnabled"
+            [disabled]="duration === null || !isEnabled || (target === 'PYTHON' && !workerId)"
             (click)="createProfilingInstance()"
             style="margin-left: 10px"
           >
@@ -105,7 +153,7 @@
             nzType="info-circle"
           ></i>
           <ng-template #titleTemplate>
-            <span>
+            <span *ngIf="target === 'JVM'; else pythonHelp">
               Please refer to
               <a
                 href="https://github.com/async-profiler/async-profiler/wiki"
@@ -116,10 +164,40 @@
               </a>
               for more detailed info of this feature.
             </span>
+            <ng-template #pythonHelp>
+              Profiles the whole Python worker, which may be shared by multiple operators.
+              <a href="https://github.com/benfred/py-spy" target="_blank" rel="noopener noreferrer">
+                py-spy documentation
+              </a>
+            </ng-template>
           </ng-template>
         </nz-form-control>
       </nz-form-item>
     </form>
+    <nz-alert
+      *ngIf="target === 'PYTHON' && workerLoadFailed"
+      nzType="error"
+      nzShowIcon
+      style="margin-top: 10px"
+      [nzMessage]="
+        workerUnavailable
+          ? 'Python profiling is unavailable. Check the configured tool path and supported environment.'
+          : 'Could not load Python workers. Check the TaskManager connection and try again.'
+      "
+    ></nz-alert>
+    <nz-alert
+      *ngIf="
+        target === 'PYTHON' &&
+        isEnabled &&
+        !isLoading &&
+        !workerLoadFailed &&
+        pythonWorkers.length === 0
+      "
+      nzType="info"
+      nzShowIcon
+      style="margin-top: 10px"
+      nzMessage="No standalone Python workers are available. Start a process-mode Python job on this TaskManager."
+    ></nz-alert>
     <nz-alert
       *ngIf="!isEnabled"
       nzType="warning"
@@ -137,13 +215,14 @@
   >
     <thead>
       <tr>
-        <th nzWidth="5%">Index</th>
-        <th nzWidth="15%">Trigger Time</th>
-        <th nzWidth="15%">Finished Time</th>
-        <th nzWidth="10%">Profiling Duration</th>
-        <th nzWidth="5%">Mode</th>
-        <th nzWidth="10%">Status</th>
-        <th nzWidth="25%">Link</th>
+        <th nzWidth="4%">Index</th>
+        <th nzWidth="13%">Trigger Time</th>
+        <th nzWidth="13%">Finished Time</th>
+        <th nzWidth="8%">Profiling Duration</th>
+        <th nzWidth="11%">Target</th>
+        <th nzWidth="11%">Mode</th>
+        <th nzWidth="8%">Status</th>
+        <th nzWidth="17%">Link</th>
         <th nzWidth="15%">Message</th>
       </tr>
     </thead>
@@ -153,7 +232,11 @@
         <td>{{ info.triggerTime | humanizeWatermarkToDatetime }}</td>
         <td>{{ info.finishedTime | humanizeWatermarkToDatetime }}</td>
         <td>{{ info.duration }} s</td>
-        <td>{{ info.mode }}</td>
+        <td>{{ info.worker ? 'Python PID ' + info.worker.pid : 'TaskManager JVM' }}</td>
+        <td>
+          {{ info.worker ? (info.includeNative ? 'Python + native' : 'Python') : info.mode }}
+          <span *ngIf="info.includeIdle">(including idle)</span>
+        </td>
         <td>{{ info.status }}</td>
         <td>
           <a (click)="downloadProfilingResult(info.outputFile)">{{ info.outputFile }}</a>

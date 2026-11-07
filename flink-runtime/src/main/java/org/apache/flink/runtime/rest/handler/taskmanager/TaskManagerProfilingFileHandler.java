@@ -36,6 +36,7 @@ import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 import javax.annotation.Nonnull;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -62,6 +63,18 @@ public class TaskManagerProfilingFileHandler
                 resourceManagerGatewayRetriever,
                 transientBlobService,
                 cacheEntryDuration);
+    }
+
+    @Override
+    protected Map<String, String> getFileResponseHeaders(String filename) {
+        if (!filename.endsWith(".svg")) {
+            return Collections.emptyMap();
+        }
+        return Map.of(
+                "Content-Type", "image/svg+xml",
+                "Content-Disposition", "attachment",
+                "X-Content-Type-Options", "nosniff",
+                "Content-Security-Policy", "sandbox; default-src 'none'");
     }
 
     @Override

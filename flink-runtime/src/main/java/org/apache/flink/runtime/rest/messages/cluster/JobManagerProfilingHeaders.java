@@ -84,4 +84,9 @@ public class JobManagerProfilingHeaders
     public Collection<? extends RestAPIVersion<?>> getSupportedAPIVersions() {
         return Collections.singleton(RuntimeRestAPIVersion.V1);
     }
+
+    @Override
+    public String operationId() {
+        return "createJobManagerProfiling";
+    }
 }

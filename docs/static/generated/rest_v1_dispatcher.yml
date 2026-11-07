@@ -453,6 +453,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MetricCollectionResponseBody"
+  /jobmanager/profiler:
+    get:
+      description: Returns the profiling history on JobManager.
+      operationId: getJobManagerProfilingList
+      responses:
+        "200":
+          description: The request was successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfilingInfoList"
+    post:
+      description: Create a profiling instance on JobManager.
+      operationId: createJobManagerProfiling
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfilingRequestBody"
+      responses:
+        "200":
+          description: The request was successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfilingInfo"
   /jobmanager/thread-dump:
     get:
       description: Returns the thread dump of the JobManager.
@@ -1861,6 +1887,72 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MetricCollectionResponseBody"
+  /taskmanagers/{taskmanagerid}/profiler:
+    get:
+      description: Returns the list of profiling result files on a TaskManager.
+      operationId: getTaskManagerProfilingList
+      parameters:
+      - name: taskmanagerid
+        in: path
+        description: 32-character hexadecimal string that identifies a task manager.
+        required: true
+        schema:
+          $ref: "#/components/schemas/ResourceID"
+      - name: target
+        in: query
+        description: "Profiling target: jvm (default) or python. The shared history\
+          \ limit applies before filtering."
+        required: false
+        style: form
+        schema:
+          type: string
+      responses:
+        "200":
+          description: The request was successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfilingInfoList"
+    post:
+      description: Returns the profiling instance of the requested TaskManager.
+      operationId: createTaskManagerProfiling
+      parameters:
+      - name: taskmanagerid
+        in: path
+        description: 32-character hexadecimal string that identifies a task manager.
+        required: true
+        schema:
+          $ref: "#/components/schemas/ResourceID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfilingRequestBody"
+      responses:
+        "200":
+          description: The request was successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfilingInfo"
+  /taskmanagers/{taskmanagerid}/python-workers:
+    get:
+      description: Returns the list of standalone Python workers on a TaskManager.
+      operationId: getTaskManagerPythonWorkerList
+      parameters:
+      - name: taskmanagerid
+        in: path
+        description: 32-character hexadecimal string that identifies a task manager.
+        required: true
+        schema:
+          $ref: "#/components/schemas/ResourceID"
+      responses:
+        "200":
+          description: The request was successful.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PythonWorkerInfoList"
   /taskmanagers/{taskmanagerid}/thread-dump:
     get:
       description: Returns the thread dump of the requested TaskManager.
@@ -3260,6 +3352,84 @@ components:
       enum:
       - AT_LEAST_ONCE
       - EXACTLY_ONCE
+    ProfilingInfo:
+      type: object
+      properties:
+        duration:
+          type: integer
+          format: int64
+        finishedTime:
+          type: integer
+          format: int64
+        includeIdle:
+          type: boolean
+        includeNative:
+          type: boolean
+        message:
+          type: string
+        mode:
+          $ref: "#/components/schemas/ProfilingMode"
+        outputFile:
+          type: string
+        profilingMode:
+          $ref: "#/components/schemas/ProfilingMode"
+        status:
+          $ref: "#/components/schemas/ProfilingStatus"
+        triggerTime:
+          type: integer
+          format: int64
+        worker:
+          $ref: "#/components/schemas/PythonWorkerInfo"
+    ProfilingInfoList:
+      type: object
+      properties:
+        profilingList:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfilingInfo"
+    ProfilingMode:
+      type: string
+      enum:
+      - CPU
+      - ALLOC
+      - LOCK
+      - WALL
+      - ITIMER
+    ProfilingRequestBody:
+      type: object
+      properties:
+        duration:
+          type: integer
+          format: int32
+        includeIdle:
+          type: boolean
+        includeNative:
+          type: boolean
+        mode:
+          $ref: "#/components/schemas/ProfilingMode"
+        workerId:
+          type: string
+    ProfilingStatus:
+      type: string
+      enum:
+      - RUNNING
+      - FINISHED
+      - FAILED
+    PythonWorkerInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        pid:
+          type: integer
+          format: int64
+    PythonWorkerInfoList:
+      type: object
+      properties:
+        workers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PythonWorkerInfo"
     QueueStatus:
       required:
       - id

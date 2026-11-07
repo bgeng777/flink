@@ -27,5 +27,17 @@ export interface ProfilingDetail {
   duration: number;
   message: string;
   outputFile: string;
-  mode: string;
+  mode: string | null;
+  worker?: PythonWorkerInfo;
+  includeIdle?: boolean;
+  includeNative?: boolean;
 }
+
+export interface PythonWorkerInfo {
+  id: string;
+  pid: number;
+}
+
+export type ProfilingRequest =
+  | { mode: string; duration: number }
+  | { workerId: string; duration: number; includeIdle: boolean; includeNative: boolean };

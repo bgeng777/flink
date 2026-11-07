@@ -42,7 +42,9 @@ import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerId;
 import org.apache.flink.runtime.rest.messages.LogInfo;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.ThreadDumpInfo;
+import org.apache.flink.runtime.rest.messages.cluster.ProfilingRequestBody;
 import org.apache.flink.runtime.shuffle.PartitionWithMetrics;
 import org.apache.flink.runtime.webmonitor.threadinfo.ThreadInfoSamplesRequest;
 import org.apache.flink.types.SerializableOptional;
@@ -385,8 +387,13 @@ public class TestingTaskExecutorGateway implements TaskExecutorGateway {
 
     @Override
     public CompletableFuture<ProfilingInfo> requestProfiling(
-            int duration, ProfilingInfo.ProfilingMode mode, Duration timeout) {
+            ProfilingRequestBody request, Duration timeout) {
         return requestProfilingSupplier.get();
+    }
+
+    @Override
+    public CompletableFuture<Collection<PythonWorkerInfo>> requestPythonWorkers(Duration timeout) {
+        return CompletableFuture.completedFuture(java.util.Collections.emptyList());
     }
 
     @Override

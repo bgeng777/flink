@@ -46,7 +46,9 @@ import org.apache.flink.runtime.resourcemanager.TaskManagerInfoWithSlots;
 import org.apache.flink.runtime.resourcemanager.exceptions.UnknownTaskExecutorException;
 import org.apache.flink.runtime.rest.messages.LogInfo;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.ThreadDumpInfo;
+import org.apache.flink.runtime.rest.messages.cluster.ProfilingRequestBody;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerInfo;
 import org.apache.flink.runtime.shuffle.ShuffleDescriptor;
 import org.apache.flink.runtime.slots.ResourceRequirements;
@@ -503,6 +505,12 @@ public class TestingResourceManagerGateway implements ResourceManagerGateway {
     }
 
     @Override
+    public CompletableFuture<Collection<PythonWorkerInfo>> requestPythonWorkers(
+            ResourceID taskManagerId, Duration timeout) {
+        return CompletableFuture.completedFuture(java.util.Collections.emptyList());
+    }
+
+    @Override
     public CompletableFuture<Collection<ProfilingInfo>> requestTaskManagerProfilingList(
             ResourceID taskManagerId, Duration timeout) {
         final Function<ResourceID, CompletableFuture<Collection<ProfilingInfo>>> function =
@@ -518,10 +526,7 @@ public class TestingResourceManagerGateway implements ResourceManagerGateway {
 
     @Override
     public CompletableFuture<ProfilingInfo> requestProfiling(
-            ResourceID taskManagerId,
-            int duration,
-            ProfilingInfo.ProfilingMode mode,
-            Duration timeout) {
+            ResourceID taskManagerId, ProfilingRequestBody request, Duration timeout) {
         final Function<ResourceID, CompletableFuture<ProfilingInfo>> function =
                 this.requestProfilingFunction;
 

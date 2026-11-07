@@ -67,6 +67,67 @@ Profiling Instance
 {{% /center %}}
 
 
+## Standalone Python workers
+
+Python workers in PyFlink process mode can be sampled using an administrator-installed
+[py-spy](https://github.com/benfred/py-spy). Enable the existing profiler and configure the
+absolute path to the executable on each TaskManager:
+
+```yaml
+rest.profiling.enabled: true
+rest.python-profiling.executable: /opt/diagnostics/py-spy
+```
+
+This requires permission to inspect the worker process in the TaskManager's PID namespace.
+On Linux, the same user ID alone may not be sufficient because of ptrace, Yama or container
+restrictions. On macOS, py-spy requires elevated permissions. Flink does not install the tool
+or change operating-system permissions. A failed diagnostic request does not fail the job.
+
+In the TaskManager's **Profiler** tab, select **Python worker** as the target. A single available
+worker is selected automatically; with multiple workers, select the process to sample. If the
+selected worker exits, the selection is cleared rather than silently changing to another process.
+**Include native stacks** and **Include idle threads** control the corresponding sampling options.
+The history shows the worker PID and whether native or idle sampling was requested.
+
+To use REST directly, call `GET /taskmanagers/:taskmanagerid/python-workers` to find live workers. Select the returned
+`id`, then submit to the existing profiling endpoint:
+
+```text
+POST /taskmanagers/:taskmanagerid/profiler
+```
+
+```json
+{"duration": 10, "workerId": "<id from worker listing>", "includeIdle": false, "includeNative": false}
+```
+
+Omit the JVM `mode` field when selecting a Python worker. The sampling rate is 50 Hz;
+`includeIdle` adds waiting threads to the default active-thread sampling. `includeNative` enables
+py-spy's native extension stacks, including C/C++ or Cython code where the installed tool and
+platform support them. Both options default to false. Native symbol and line-number resolution
+depend on the available debug symbols and source files. On Linux AArch64, use a py-spy build with native
+unwinding support; the integration has been validated with py-spy 0.4.3 and CPython 3.11.
+The py-spy 0.4.1 AArch64 wheel does not support native capture. An unsupported native request fails
+with the tool's error message; Flink does not retry it without native sampling. Flame widths represent
+sample proportions, not exact CPU time. A worker may serve multiple operators, so its profile
+describes the whole process. Embedded/thread mode and local loopback workers are not included.
+
+Read status from `GET /taskmanagers/:taskmanagerid/profiler?target=python`.
+Without `target`, the endpoint continues to return JVM history only. Python sessions use the same
+`RUNNING`, `FINISHED` and `FAILED` states, history retention and concurrency limit as JVM sessions.
+The optional `worker` field records the sampled identity; `includeNative` and `includeIdle` record the requested options. On success, download `outputFile` through
+`GET /taskmanagers/:taskmanagerid/profiler/:filename`; Python results are SVG attachments.
+The existing `rest.profiling.duration-max`, `rest.profiling.history-size` and `rest.profiling.dir`
+settings apply. History capacity is shared by JVM and Python sessions before filtering.
+An unavailable Python profiler returns HTTP 503; a concurrent capture returns HTTP 409.
+Missing tools, permission failures, zero samples or worker exit appear in the failed session message.
+
+Set `rest.profiling.dir` to the desired local directory on each TaskManager, for example
+`/flink/log/profiling`. Python captures are stored there as `python-<uuid>.svg`; the TaskManager
+must be able to create and write to the directory. The directory is also used for JVM results.
+History eviction deletes the corresponding files, and failed captures clean up temporary files.
+TaskManager restart does not restore history from files. A persistent volume preserves remaining
+files but does not restore profiling sessions; export files separately for long-term retention.
+
 ## Troubleshooting
 1. **Failed to profiling in CPU mode: No access to perf events. Try --fdtransfer or --all-user option or 'sysctl kernel.perf_event_paranoid=1'** \
 That means `perf_event_open()` syscall has failed. By default, Docker container restricts the access to `perf_event_open` syscall. The recommended solution is to fall back to ITIMER profiling mode. It is similar to CPU mode, but does not require `perf_events` support. As a drawback, there will be no kernel stack traces.

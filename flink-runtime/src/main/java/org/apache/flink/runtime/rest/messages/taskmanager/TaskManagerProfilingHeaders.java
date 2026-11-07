@@ -76,4 +76,9 @@ public class TaskManagerProfilingHeaders
     public String getDescription() {
         return "Returns the profiling instance of the requested TaskManager.";
     }
+
+    @Override
+    public String operationId() {
+        return "createTaskManagerProfiling";
+    }
 }

@@ -41,7 +41,9 @@ import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerId;
 import org.apache.flink.runtime.rest.messages.LogInfo;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.ThreadDumpInfo;
+import org.apache.flink.runtime.rest.messages.cluster.ProfilingRequestBody;
 import org.apache.flink.runtime.webmonitor.threadinfo.ThreadInfoSamplesRequest;
 import org.apache.flink.types.SerializableOptional;
 import org.apache.flink.util.SerializedValue;
@@ -252,8 +254,13 @@ public class TaskExecutorGatewayDecoratorBase implements TaskExecutorGateway {
 
     @Override
     public CompletableFuture<ProfilingInfo> requestProfiling(
-            int duration, ProfilingInfo.ProfilingMode mode, Duration timeout) {
-        return originalGateway.requestProfiling(duration, mode, timeout);
+            ProfilingRequestBody request, Duration timeout) {
+        return originalGateway.requestProfiling(request, timeout);
+    }
+
+    @Override
+    public CompletableFuture<Collection<PythonWorkerInfo>> requestPythonWorkers(Duration timeout) {
+        return originalGateway.requestPythonWorkers(timeout);
     }
 
     @Override

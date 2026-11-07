@@ -56,6 +56,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.StringWriter;
 import java.nio.channels.FileChannel;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -231,6 +232,15 @@ public class HandlerUtils {
 
     public static void transferFile(ChannelHandlerContext ctx, File file, HttpRequest httpRequest)
             throws FlinkException {
+        transferFile(ctx, file, httpRequest, Collections.emptyMap());
+    }
+
+    public static void transferFile(
+            ChannelHandlerContext ctx,
+            File file,
+            HttpRequest httpRequest,
+            Map<String, String> headers)
+            throws FlinkException {
         final RandomAccessFile randomAccessFile;
 
         try {
@@ -247,6 +257,7 @@ public class HandlerUtils {
             try {
                 HttpResponse response = new DefaultHttpResponse(HTTP_1_1, OK);
                 response.headers().set(CONTENT_TYPE, "text/plain");
+                headers.forEach((name, value) -> response.headers().set(name, value));
 
                 if (HttpUtil.isKeepAlive(httpRequest)) {
                     response.headers().set(CONNECTION, HttpHeaderValues.KEEP_ALIVE);

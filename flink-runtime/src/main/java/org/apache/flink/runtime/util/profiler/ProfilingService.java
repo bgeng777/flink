@@ -23,6 +23,7 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.util.profiler.PythonWorkerRegistry.Worker;
 import org.apache.flink.util.CollectionUtil;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
@@ -33,6 +34,8 @@ import one.profiler.AsyncProfiler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -40,15 +43,18 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 /** Create and keep profiling requests with rolling policy. */
 public class ProfilingService implements Closeable {
@@ -61,6 +67,8 @@ public class ProfilingService implements Closeable {
     private final int historySizeLimit;
     private final ScheduledExecutorService scheduledExecutor;
     private ProfilingFuture profilingFuture;
+    @Nullable private String pythonProfilingResourceID;
+    private CompletableFuture<Void> pythonProfilingCompletion = FutureUtils.completedVoidFuture();
 
     private ProfilingService(Configuration configs) {
         this.profilingMap = new HashMap<>();
@@ -89,7 +97,7 @@ public class ProfilingService implements Closeable {
         return instance;
     }
 
-    public CompletableFuture<ProfilingInfo> requestProfiling(
+    public synchronized CompletableFuture<ProfilingInfo> requestProfiling(
             String resourceID, long duration, ProfilingInfo.ProfilingMode mode) {
         if (profilingFuture != null && !profilingFuture.isDone()) {
             return FutureUtils.completedExceptionally(
@@ -98,6 +106,7 @@ public class ProfilingService implements Closeable {
         ProfilingInfo profilingInfo = ProfilingInfo.create(duration, mode);
         profilingMap.putIfAbsent(resourceID, new ArrayDeque<>());
         profilingMap.get(resourceID).addFirst(profilingInfo);
+        rollingClearing(profilingMap.get(resourceID));
         AsyncProfiler profiler = AsyncProfiler.getInstance();
         try {
             String response =
@@ -118,7 +127,67 @@ public class ProfilingService implements Closeable {
         return CompletableFuture.completedFuture(profilingInfo);
     }
 
-    private void stopProfiling(String resourceID) {
+    public synchronized CompletableFuture<ProfilingInfo> requestPythonProfiling(
+            String resourceID,
+            long duration,
+            Worker worker,
+            PythonWorkerRegistry registry,
+            String executable,
+            boolean includeIdle,
+            boolean includeNative) {
+        if (profilingFuture != null && !profilingFuture.isDone()) {
+            return FutureUtils.completedExceptionally(
+                    new IllegalStateException(resourceID + " is still under profiling."));
+        }
+        final ProfilingInfo info =
+                ProfilingInfo.createPython(duration, worker.toInfo(), includeIdle, includeNative);
+        profilingMap.putIfAbsent(resourceID, new ArrayDeque<>());
+        profilingMap.get(resourceID).addFirst(info);
+        rollingClearing(profilingMap.get(resourceID));
+        final PythonWorkerProfiler profiler =
+                new PythonWorkerProfiler(
+                        registry,
+                        worker,
+                        executable,
+                        Paths.get(profilingResultDir),
+                        duration,
+                        includeIdle,
+                        includeNative);
+        final CompletableFuture<Void> completion = new CompletableFuture<>();
+        pythonProfilingResourceID = resourceID;
+        pythonProfilingCompletion = completion;
+        profilingFuture = new ProfilingFuture(completion, profiler::cancel);
+        scheduledExecutor.execute(
+                () -> {
+                    try {
+                        final String filename = profiler.profile();
+                        synchronized (this) {
+                            info.success(filename);
+                        }
+                    } catch (Exception e) {
+                        if (e instanceof InterruptedException) {
+                            Thread.currentThread().interrupt();
+                        }
+                        synchronized (this) {
+                            info.fail("Python profiling failed: " + e.getMessage());
+                        }
+                    } finally {
+                        completion.complete(null);
+                    }
+                });
+        return CompletableFuture.completedFuture(info);
+    }
+
+    /** Cancels this TaskManager's Python capture and completes after sampler cleanup. */
+    public synchronized CompletableFuture<Void> cancelPythonProfiling(String resourceID) {
+        if (resourceID.equals(pythonProfilingResourceID) && !pythonProfilingCompletion.isDone()) {
+            profilingFuture.cancel();
+            return pythonProfilingCompletion;
+        }
+        return FutureUtils.completedVoidFuture();
+    }
+
+    private synchronized void stopProfiling(String resourceID) {
         AsyncProfiler profiler = AsyncProfiler.getInstance();
         ArrayDeque<ProfilingInfo> profilingList = profilingMap.get(resourceID);
         Preconditions.checkState(!CollectionUtil.isNullOrEmpty(profilingList));
@@ -160,13 +229,13 @@ public class ProfilingService implements Closeable {
     }
 
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
         try {
             if (profilingFuture != null && !profilingFuture.isDone()) {
                 profilingFuture.cancel();
             }
             if (!scheduledExecutor.isShutdown()) {
-                scheduledExecutor.shutdownNow();
+                scheduledExecutor.shutdown();
             }
         } catch (Exception e) {
             LOG.error("Exception thrown during stopping profiling service. ", e);
@@ -175,9 +244,10 @@ public class ProfilingService implements Closeable {
         }
     }
 
-    public CompletableFuture<Collection<ProfilingInfo>> getProfilingList(String resourceID) {
+    public synchronized CompletableFuture<Collection<ProfilingInfo>> getProfilingList(
+            String resourceID) {
         return CompletableFuture.completedFuture(
-                profilingMap.getOrDefault(resourceID, new ArrayDeque<>()));
+                new ArrayList<>(profilingMap.getOrDefault(resourceID, new ArrayDeque<>())));
     }
 
     public String getProfilingResultDir() {
@@ -217,12 +287,30 @@ public class ProfilingService implements Closeable {
      * timeout or cancelled.
      */
     class ProfilingFuture {
-        private final ScheduledFuture<?> future;
-        private final Runnable handler;
+        private final Future<?> future;
+        private final BooleanSupplier cancelAction;
 
         public ProfilingFuture(long duration, Runnable handler) {
-            this.handler = handler;
-            this.future = scheduledExecutor.schedule(handler, duration, TimeUnit.SECONDS);
+            final ScheduledFuture<?> scheduled =
+                    scheduledExecutor.schedule(handler, duration, TimeUnit.SECONDS);
+            this.future = scheduled;
+            this.cancelAction =
+                    () -> {
+                        if (!scheduled.cancel(true)) {
+                            return false;
+                        }
+                        handler.run();
+                        return true;
+                    };
+        }
+
+        ProfilingFuture(CompletableFuture<?> completion, Runnable cancel) {
+            this.future = completion;
+            this.cancelAction =
+                    () -> {
+                        cancel.run();
+                        return true;
+                    };
         }
 
         /**
@@ -244,12 +332,7 @@ public class ProfilingService implements Closeable {
             if (isDone()) {
                 return true;
             }
-            if (!future.cancel(true)) {
-                return false;
-            }
-            // If cancelled, we have to trigger handler immediately for stopping profiler.
-            handler.run();
-            return true;
+            return cancelAction.getAsBoolean();
         }
     }
 }

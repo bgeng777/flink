@@ -21,14 +21,18 @@ package org.apache.flink.streaming.api.operators.python.process;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.python.PythonFunctionRunner;
 import org.apache.flink.python.env.PythonDependencyInfo;
 import org.apache.flink.python.env.process.ProcessPythonEnvironmentManager;
+import org.apache.flink.runtime.taskmanager.TaskManagerRuntimeInfo;
+import org.apache.flink.runtime.util.profiler.PythonWorkerRegistry;
 import org.apache.flink.streaming.api.operators.python.AbstractPythonFunctionOperator;
 import org.apache.flink.streaming.api.runners.python.beam.BeamPythonFunctionRunner;
 import org.apache.flink.table.functions.python.PythonEnv;
 
 import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -124,10 +128,27 @@ public abstract class AbstractExternalPythonFunctionOperator<OUT>
                 PythonDependencyInfo.create(config, getRuntimeContext().getDistributedCache());
         PythonEnv pythonEnv = getPythonEnv();
         if (pythonEnv.getExecType() == PythonEnv.ExecType.PROCESS) {
+            final Map<String, String> environment =
+                    systemEnvEnabled ? new HashMap<>(System.getenv()) : new HashMap<>();
+            final TaskManagerRuntimeInfo taskManagerInfo =
+                    getContainingTask().getEnvironment().getTaskManagerInfo();
+            if (taskManagerInfo.getConfiguration().get(RestOptions.ENABLE_PROFILER)
+                    && taskManagerInfo
+                            .getConfiguration()
+                            .getOptional(RestOptions.PYTHON_PROFILING_EXECUTABLE)
+                            .isPresent()) {
+                environment.put(
+                        PythonWorkerRegistry.ENVIRONMENT_VARIABLE,
+                        PythonWorkerRegistry.getRegistrationDirectory(
+                                        taskManagerInfo.getTmpWorkingDirectory())
+                                .toString());
+            } else {
+                environment.remove(PythonWorkerRegistry.ENVIRONMENT_VARIABLE);
+            }
             return new ProcessPythonEnvironmentManager(
                     dependencyInfo,
                     getContainingTask().getEnvironment().getTaskManagerInfo().getTmpDirectories(),
-                    systemEnvEnabled ? new HashMap<>(System.getenv()) : new HashMap<>(),
+                    environment,
                     getRuntimeContext().getJobInfo().getJobId());
         } else {
             throw new UnsupportedOperationException(

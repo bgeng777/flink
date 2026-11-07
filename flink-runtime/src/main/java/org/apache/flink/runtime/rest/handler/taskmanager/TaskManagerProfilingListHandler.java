@@ -28,8 +28,9 @@ import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
 import org.apache.flink.runtime.rest.messages.MessageHeaders;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
 import org.apache.flink.runtime.rest.messages.ProfilingInfoList;
+import org.apache.flink.runtime.rest.messages.ProfilingTargetQueryParameter;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerIdPathParameter;
-import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerMessageParameters;
+import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerProfilingListParameters;
 import org.apache.flink.runtime.webmonitor.RestfulGateway;
 import org.apache.flink.runtime.webmonitor.retriever.GatewayRetriever;
 import org.apache.flink.util.ExceptionUtils;
@@ -41,14 +42,19 @@ import javax.annotation.Nonnull;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.stream.Collectors;
 
 /** Handler which serves detailed TaskManager profiling list information. */
 public class TaskManagerProfilingListHandler
         extends AbstractResourceManagerHandler<
-                RestfulGateway, EmptyRequestBody, ProfilingInfoList, TaskManagerMessageParameters> {
+                RestfulGateway,
+                EmptyRequestBody,
+                ProfilingInfoList,
+                TaskManagerProfilingListParameters> {
 
     private final GatewayRetriever<ResourceManagerGateway> resourceManagerGatewayRetriever;
 
@@ -56,7 +62,7 @@ public class TaskManagerProfilingListHandler
             GatewayRetriever<? extends RestfulGateway> leaderRetriever,
             Duration timeout,
             Map<String, String> responseHeaders,
-            MessageHeaders<EmptyRequestBody, ProfilingInfoList, TaskManagerMessageParameters>
+            MessageHeaders<EmptyRequestBody, ProfilingInfoList, TaskManagerProfilingListParameters>
                     messageHeaders,
             GatewayRetriever<ResourceManagerGateway> resourceManagerGatewayRetriever) {
         super(
@@ -75,6 +81,12 @@ public class TaskManagerProfilingListHandler
             @Nonnull HandlerRequest<EmptyRequestBody> request,
             @Nonnull ResourceManagerGateway gateway)
             throws RestHandlerException {
+        final List<String> targets = request.getQueryParameter(ProfilingTargetQueryParameter.class);
+        if (targets.size() > 1) {
+            throw new RestHandlerException(
+                    "Specify a single profiling target.", HttpResponseStatus.BAD_REQUEST);
+        }
+        final boolean python = !targets.isEmpty() && targets.get(0).equals("python");
         final ResourceID taskManagerId = request.getPathParameter(TaskManagerIdPathParameter.class);
         final ResourceManagerGateway resourceManagerGateway =
                 getResourceManagerGateway(resourceManagerGatewayRetriever);
@@ -82,7 +94,15 @@ public class TaskManagerProfilingListHandler
                 resourceManagerGateway.requestTaskManagerProfilingList(taskManagerId, getTimeout());
 
         return profilingListFuture
-                .thenApply(ProfilingInfoList::new)
+                .thenApply(
+                        profiles ->
+                                new ProfilingInfoList(
+                                        profiles.stream()
+                                                .filter(
+                                                        info ->
+                                                                (info.getWorker() != null)
+                                                                        == python)
+                                                .collect(Collectors.toList())))
                 .exceptionally(
                         (throwable) -> {
                             final Throwable strippedThrowable =

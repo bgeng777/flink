@@ -1,0 +1,89 @@
+{
+  "_license": [
+    "Licensed to the Apache Software Foundation (ASF) under one",
+    "or more contributor license agreements. See the NOTICE file",
+    "distributed with this work for additional information",
+    "regarding copyright ownership. The ASF licenses this file",
+    "to you under the Apache License, Version 2.0 (the",
+    "\"License\"); you may not use this file except in compliance",
+    "with the License. You may obtain a copy of the License at",
+    "",
+    "  http://www.apache.org/licenses/LICENSE-2.0",
+    "",
+    "Unless required by applicable law or agreed to in writing,",
+    "software distributed under the License is distributed on an",
+    "\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY",
+    "KIND, either express or implied. See the License for the",
+    "specific language governing permissions and limitations",
+    "under the License."
+  ],
+  "date": "2026-10-23",
+  "baseline_commit": "8d01380ff5bf9892462ef9808b1b56fd9723f54d",
+  "environment": {
+    "os": "macOS arm64",
+    "java": "JDK 21",
+    "java_distribution": "2.3-SNAPSHOT (existing build)",
+    "python": "3.11",
+    "py_spy": "0.4.1"
+  },
+  "controller_tests_passed": 14,
+  "actual_sampling_succeeded": false,
+  "actual_flamegraphs": 0,
+  "sampling_overhead_measured": false,
+  "smoke": {
+    "worker": {
+      "registration_id": "48e3d3dee07644afab25f90548442eaf",
+      "worker_id": "1-1",
+      "pid": 87639,
+      "start_token": "Fri Oct 23 00:34:43 2026",
+      "scope": "process",
+      "owners": null
+    },
+    "profile": {
+      "profile_id": "eb227836b2d444e58d2adf3db61daa3c",
+      "worker": {
+        "registration_id": "48e3d3dee07644afab25f90548442eaf",
+        "worker_id": "1-1",
+        "pid": 87639,
+        "start_token": "Fri Oct 23 00:34:43 2026",
+        "scope": "process",
+        "owners": null
+      },
+      "status": "FAILED",
+      "duration_seconds": 2,
+      "rate_hz": 25,
+      "include_idle": false,
+      "started_at": 1792686884.364588,
+      "error_code": "PERMISSION_DENIED",
+      "error": "This program requires root on OSX.\nTry running again with elevated permissions by going 'sudo !!'\n",
+      "finished_at": 1792686884.4856908
+    },
+    "job": {
+      "client_pid": 87590,
+      "rows": [
+        [
+          87639,
+          1,
+          41541750
+        ],
+        [
+          87639,
+          2,
+          41541750
+        ],
+        [
+          87639,
+          3,
+          41541750
+        ],
+        [
+          87639,
+          4,
+          41541750
+        ]
+      ]
+    },
+    "worker_pid_verified": true,
+    "workers_after_job": []
+  }
+}

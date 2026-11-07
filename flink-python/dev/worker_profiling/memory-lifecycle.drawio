@@ -1,0 +1,117 @@
+<!--
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements. See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership. The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied. See the License for the
+specific language governing permissions and limitations
+under the License.
+-->
+<mxfile>
+  <diagram id="seqlayout" name="Memray attach reference experiment">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1350" pageHeight="1314" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="client" value="Flink UI / REST" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="100" y="100" width="170" height="1099" as="geometry" />
+        </mxCell>
+        <mxCell id="session" value="TM ProfilingService" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="400" y="100" width="170" height="1099" as="geometry" />
+        </mxCell>
+        <mxCell id="tool" value="Memray CLI" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="700" y="100" width="170" height="1099" as="geometry" />
+        </mxCell>
+        <mxCell id="worker" value="Python worker" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;size=40;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="100" width="170" height="1099" as="geometry" />
+        </mxCell>
+        <mxCell id="act0" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="session">
+          <mxGeometry x="80" y="105" width="10" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="act1" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="worker">
+          <mxGeometry x="80" y="349" width="10" height="58" as="geometry" />
+        </mxCell>
+        <mxCell id="act2" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="tool">
+          <mxGeometry x="80" y="291" width="10" height="174" as="geometry" />
+        </mxCell>
+        <mxCell id="act3" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="worker">
+          <mxGeometry x="80" y="711" width="10" height="58" as="geometry" />
+        </mxCell>
+        <mxCell id="act4" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="tool">
+          <mxGeometry x="80" y="653" width="10" height="174" as="geometry" />
+        </mxCell>
+        <mxCell id="act5" value="" style="html=1;points=[];perimeter=orthogonalPerimeter;outlineConnect=0;fillColor=#ffffff;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="tool">
+          <mxGeometry x="80" y="885" width="10" height="58" as="geometry" />
+        </mxCell>
+        <mxCell id="m0" value="POST MEMORY" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.0955;entryX=0;entryY=0.0;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="client" target="act0">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m1" value="Validate identity / hold admission" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.4531;entryX=1;entryY=0.6875;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act0" target="act0">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="545" y="263" />
+              <mxPoint x="545" y="293" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m2" value="RUNNING" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;curved=0;rounded=0;strokeColor=#999999;fontColor=#999999;exitX=0;exitY=1.0;entryX=0.5;entryY=0.212;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act0" target="client">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m3" value="attach -o bin --duration D+G" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.2648;entryX=0;entryY=0.0;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="session" target="act2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m4" value="Start Tracker + stop timer" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.3333;entryX=0;entryY=0.0;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act2" target="act1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m5" value="Started" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;curved=0;rounded=0;strokeColor=#999999;fontColor=#999999;exitX=0;exitY=1.0;entryX=1;entryY=0.6667;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act1" target="act2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m6" value="attach exits" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;curved=0;rounded=0;strokeColor=#999999;fontColor=#999999;exitX=0;exitY=1.0;entryX=0.5;entryY=0.4231;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act2" target="session">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="note7" value="Tracker keeps recording" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1105" y="603" width="205" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="note8" value="Duration D reached" style="shape=note;whiteSpace=wrap;html=1;size=14;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;labelBackgroundColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="505" y="668" width="205" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="m9" value="detach (same worker identity)" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.5942;entryX=0;entryY=0.0;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="session" target="act4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m10" value="Stop Tracker / close writer" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=1;exitY=0.3333;entryX=0;entryY=0.0;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act4" target="act3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m11" value="Stopped" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;curved=0;rounded=0;strokeColor=#999999;fontColor=#999999;exitX=0;exitY=1.0;entryX=1;entryY=0.6667;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act3" target="act4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m12" value="Stop confirmed" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;curved=0;rounded=0;strokeColor=#999999;fontColor=#999999;exitX=0;exitY=1.0;entryX=0.5;entryY=0.7525;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act4" target="session">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m13" value="flamegraph --no-web" style="html=1;verticalAlign=bottom;endArrow=block;curved=0;rounded=0;exitX=0.5;exitY=0.8053;entryX=0;entryY=0.0;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="session" target="act5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m14" value="Offline HTML" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;curved=0;rounded=0;strokeColor=#999999;fontColor=#999999;exitX=0;exitY=1.0;entryX=0.5;entryY=0.8581;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="act5" target="session">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="m15" value="FINISHED / BLOB download" style="html=1;verticalAlign=bottom;endArrow=open;dashed=1;curved=0;rounded=0;strokeColor=#999999;fontColor=#999999;exitX=0.5;exitY=0.9108;entryX=0.5;entryY=0.9108;fontSize=14;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="session" target="client">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="title" value="Memray attach — reference experiment" style="text;html=1;align=left;fontStyle=1;fontSize=22;" vertex="1" parent="1">
+          <mxGeometry x="100" y="20" width="1150" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="footer" value="D = requested duration, G = cleanup grace. Unconfirmed stop keeps admission held.&#10;Reference experiment. Primary memory design uses a worker-owned Tracker." style="text;html=1;whiteSpace=wrap;align=left;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1234" width="1200" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

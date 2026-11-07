@@ -29,7 +29,7 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseSt
 /** Headers for the {@link TaskManagerProfilingListHandler}. */
 public class TaskManagerProfilingListHeaders
         implements RuntimeMessageHeaders<
-                EmptyRequestBody, ProfilingInfoList, TaskManagerMessageParameters> {
+                EmptyRequestBody, ProfilingInfoList, TaskManagerProfilingListParameters> {
 
     private static final TaskManagerProfilingListHeaders INSTANCE =
             new TaskManagerProfilingListHeaders();
@@ -64,8 +64,8 @@ public class TaskManagerProfilingListHeaders
     }
 
     @Override
-    public TaskManagerMessageParameters getUnresolvedMessageParameters() {
-        return new TaskManagerMessageParameters();
+    public TaskManagerProfilingListParameters getUnresolvedMessageParameters() {
+        return new TaskManagerProfilingListParameters();
     }
 
     @Override

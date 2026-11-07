@@ -53,6 +53,7 @@ import javax.annotation.Nonnull;
 import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -104,6 +105,10 @@ public abstract class AbstractTaskManagerFileHandler<M extends TaskManagerMessag
                                 });
     }
 
+    protected Map<String, String> getFileResponseHeaders(String filename) {
+        return Collections.emptyMap();
+    }
+
     @Override
     protected CompletableFuture<Void> respondToRequest(
             ChannelHandlerContext ctx,
@@ -142,7 +147,8 @@ public abstract class AbstractTaskManagerFileHandler<M extends TaskManagerMessag
                             }
 
                             try {
-                                HandlerUtils.transferFile(ctx, file, httpRequest);
+                                HandlerUtils.transferFile(
+                                        ctx, file, httpRequest, getFileResponseHeaders(filename));
                             } catch (FlinkException e) {
                                 throw new CompletionException(
                                         new FlinkException(

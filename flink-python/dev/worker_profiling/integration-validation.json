@@ -1,0 +1,58 @@
+{
+  "flink_version": "2.4-SNAPSHOT",
+  "base_commit": "8d01380ff5bf9892462ef9808b1b56fd9723f54d",
+  "source": "local uncommitted implementation on this branch",
+  "real_flamegraphs": 0,
+  "sampling_overhead_measured": false,
+  "backend": "Flink REST/RM/TM",
+  "worker": {
+    "id": "a10d59c3e82c4c93828fcc1619b9f5b0",
+    "beamWorkerId": "1-1",
+    "pid": 44753,
+    "startToken": "Fri Oct 23 01:38:52 2026"
+  },
+  "profile": {
+    "status": "FAILED",
+    "mode": null,
+    "triggerTime": 1792690733571,
+    "finishedTime": 1792690733712,
+    "duration": 2,
+    "message": "Python profiling failed: py-spy exited with code 1: This program requires root on OSX.\nTry running again with elevated permissions by going 'sudo !!'\n",
+    "outputFile": null,
+    "profilingMode": null,
+    "worker": {
+      "id": "a10d59c3e82c4c93828fcc1619b9f5b0",
+      "beamWorkerId": "1-1",
+      "pid": 44753,
+      "startToken": "Fri Oct 23 01:38:52 2026"
+    },
+    "includeIdle": false
+  },
+  "job": {
+    "client_pid": 44732,
+    "rows": [
+      [
+        44753,
+        1,
+        41541750
+      ],
+      [
+        44753,
+        2,
+        41541750
+      ],
+      [
+        44753,
+        3,
+        41541750
+      ],
+      [
+        44753,
+        4,
+        41541750
+      ]
+    ]
+  },
+  "worker_pid_verified": true,
+  "worker_exited": true
+}

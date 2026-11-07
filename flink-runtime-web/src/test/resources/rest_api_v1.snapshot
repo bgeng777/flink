@@ -1077,6 +1077,165 @@
       "type" : "any"
     }
   }, {
+    "url" : "/jobmanager/profiler",
+    "method" : "POST",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:cluster:ProfilingRequestBody",
+      "properties" : {
+        "mode" : {
+          "type" : "string",
+          "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+        },
+        "duration" : {
+          "type" : "integer"
+        },
+        "workerId" : {
+          "type" : "string"
+        },
+        "includeIdle" : {
+          "type" : "boolean"
+        },
+        "includeNative" : {
+          "type" : "boolean"
+        }
+      }
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:ProfilingInfo",
+      "properties" : {
+        "status" : {
+          "type" : "string",
+          "enum" : [ "RUNNING", "FINISHED", "FAILED" ]
+        },
+        "mode" : {
+          "type" : "string",
+          "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+        },
+        "triggerTime" : {
+          "type" : "integer"
+        },
+        "finishedTime" : {
+          "type" : "integer"
+        },
+        "duration" : {
+          "type" : "integer"
+        },
+        "message" : {
+          "type" : "string"
+        },
+        "outputFile" : {
+          "type" : "string"
+        },
+        "profilingMode" : {
+          "type" : "string",
+          "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+        },
+        "worker" : {
+          "type" : "object",
+          "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
+          "properties" : {
+            "id" : {
+              "type" : "string"
+            },
+            "pid" : {
+              "type" : "integer"
+            }
+          }
+        },
+        "includeIdle" : {
+          "type" : "boolean"
+        },
+        "includeNative" : {
+          "type" : "boolean"
+        }
+      }
+    }
+  }, {
+    "url" : "/jobmanager/profiler",
+    "method" : "GET",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:EmptyRequestBody"
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:ProfilingInfoList",
+      "properties" : {
+        "profilingList" : {
+          "type" : "array",
+          "items" : {
+            "type" : "object",
+            "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:ProfilingInfo",
+            "properties" : {
+              "status" : {
+                "type" : "string",
+                "enum" : [ "RUNNING", "FINISHED", "FAILED" ]
+              },
+              "mode" : {
+                "type" : "string",
+                "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+              },
+              "triggerTime" : {
+                "type" : "integer"
+              },
+              "finishedTime" : {
+                "type" : "integer"
+              },
+              "duration" : {
+                "type" : "integer"
+              },
+              "message" : {
+                "type" : "string"
+              },
+              "outputFile" : {
+                "type" : "string"
+              },
+              "profilingMode" : {
+                "type" : "string",
+                "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+              },
+              "worker" : {
+                "type" : "object",
+                "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
+                "properties" : {
+                  "id" : {
+                    "type" : "string"
+                  },
+                  "pid" : {
+                    "type" : "integer"
+                  }
+                }
+              },
+              "includeIdle" : {
+                "type" : "boolean"
+              },
+              "includeNative" : {
+                "type" : "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  }, {
     "url" : "/jobmanager/thread-dump",
     "method" : "GET",
     "status-code" : "200 OK",
@@ -5374,6 +5533,210 @@
     },
     "response" : {
       "type" : "any"
+    }
+  }, {
+    "url" : "/taskmanagers/:taskmanagerid/profiler",
+    "method" : "POST",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ {
+        "key" : "taskmanagerid"
+      } ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:cluster:ProfilingRequestBody",
+      "properties" : {
+        "mode" : {
+          "type" : "string",
+          "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+        },
+        "duration" : {
+          "type" : "integer"
+        },
+        "workerId" : {
+          "type" : "string"
+        },
+        "includeIdle" : {
+          "type" : "boolean"
+        },
+        "includeNative" : {
+          "type" : "boolean"
+        }
+      }
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:ProfilingInfo",
+      "properties" : {
+        "status" : {
+          "type" : "string",
+          "enum" : [ "RUNNING", "FINISHED", "FAILED" ]
+        },
+        "mode" : {
+          "type" : "string",
+          "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+        },
+        "triggerTime" : {
+          "type" : "integer"
+        },
+        "finishedTime" : {
+          "type" : "integer"
+        },
+        "duration" : {
+          "type" : "integer"
+        },
+        "message" : {
+          "type" : "string"
+        },
+        "outputFile" : {
+          "type" : "string"
+        },
+        "profilingMode" : {
+          "type" : "string",
+          "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+        },
+        "worker" : {
+          "type" : "object",
+          "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
+          "properties" : {
+            "id" : {
+              "type" : "string"
+            },
+            "pid" : {
+              "type" : "integer"
+            }
+          }
+        },
+        "includeIdle" : {
+          "type" : "boolean"
+        },
+        "includeNative" : {
+          "type" : "boolean"
+        }
+      }
+    }
+  }, {
+    "url" : "/taskmanagers/:taskmanagerid/profiler",
+    "method" : "GET",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ {
+        "key" : "taskmanagerid"
+      } ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ {
+        "key" : "target",
+        "mandatory" : false
+      } ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:EmptyRequestBody"
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:ProfilingInfoList",
+      "properties" : {
+        "profilingList" : {
+          "type" : "array",
+          "items" : {
+            "type" : "object",
+            "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:ProfilingInfo",
+            "properties" : {
+              "status" : {
+                "type" : "string",
+                "enum" : [ "RUNNING", "FINISHED", "FAILED" ]
+              },
+              "mode" : {
+                "type" : "string",
+                "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+              },
+              "triggerTime" : {
+                "type" : "integer"
+              },
+              "finishedTime" : {
+                "type" : "integer"
+              },
+              "duration" : {
+                "type" : "integer"
+              },
+              "message" : {
+                "type" : "string"
+              },
+              "outputFile" : {
+                "type" : "string"
+              },
+              "profilingMode" : {
+                "type" : "string",
+                "enum" : [ "CPU", "ALLOC", "LOCK", "WALL", "ITIMER" ]
+              },
+              "worker" : {
+                "type" : "object",
+                "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
+                "properties" : {
+                  "id" : {
+                    "type" : "string"
+                  },
+                  "pid" : {
+                    "type" : "integer"
+                  }
+                }
+              },
+              "includeIdle" : {
+                "type" : "boolean"
+              },
+              "includeNative" : {
+                "type" : "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  }, {
+    "url" : "/taskmanagers/:taskmanagerid/python-workers",
+    "method" : "GET",
+    "status-code" : "200 OK",
+    "file-upload" : false,
+    "path-parameters" : {
+      "pathParameters" : [ {
+        "key" : "taskmanagerid"
+      } ]
+    },
+    "query-parameters" : {
+      "queryParameters" : [ ]
+    },
+    "request" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:EmptyRequestBody"
+    },
+    "response" : {
+      "type" : "object",
+      "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfoList",
+      "properties" : {
+        "workers" : {
+          "type" : "array",
+          "items" : {
+            "type" : "object",
+            "id" : "urn:jsonschema:org:apache:flink:runtime:rest:messages:PythonWorkerInfo",
+            "properties" : {
+              "id" : {
+                "type" : "string"
+              },
+              "pid" : {
+                "type" : "integer"
+              }
+            }
+          }
+        }
+      }
     }
   }, {
     "url" : "/taskmanagers/:taskmanagerid/thread-dump",

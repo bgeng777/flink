@@ -19,6 +19,7 @@
 package org.apache.flink.runtime.rest.messages;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.Serializable;
@@ -38,6 +39,7 @@ public class ProfilingInfo implements ResponseBody, Serializable {
     private ProfilingStatus status;
 
     @JsonProperty(FIELD_NAME_MODE)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private ProfilingMode mode;
 
     @JsonProperty(FIELD_NAME_TRIGGER_TIME)
@@ -54,6 +56,39 @@ public class ProfilingInfo implements ResponseBody, Serializable {
 
     @JsonProperty(FIELD_NAME_OUTPUT_FILE)
     private String outputFile;
+
+    @JsonProperty("worker")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private PythonWorkerInfo worker;
+
+    @JsonProperty("includeIdle")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean includeIdle;
+
+    @JsonProperty("includeNative")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean includeNative;
+
+    public Boolean getIncludeNative() {
+        return includeNative;
+    }
+
+    public PythonWorkerInfo getWorker() {
+        return worker;
+    }
+
+    public Boolean getIncludeIdle() {
+        return includeIdle;
+    }
+
+    public static ProfilingInfo createPython(
+            long duration, PythonWorkerInfo worker, boolean includeIdle, boolean includeNative) {
+        ProfilingInfo info = create(duration, null);
+        info.worker = worker;
+        info.includeIdle = includeIdle;
+        info.includeNative = includeNative;
+        return info;
+    }
 
     private ProfilingInfo() {}
 
@@ -93,6 +128,7 @@ public class ProfilingInfo implements ResponseBody, Serializable {
         return status;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public ProfilingMode getProfilingMode() {
         return mode;
     }

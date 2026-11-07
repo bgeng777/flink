@@ -107,6 +107,7 @@ public abstract class AbstractPythonEnvironmentManager implements PythonEnvironm
                             "PATH",
                             "python",
                             "BOOT_LOG_DIR",
+                            "PYFLINK_WORKER_PROFILE_DIR",
                             PYFLINK_GATEWAY_DISABLED,
                             PYTHON_REQUIREMENTS_FILE,
                             PYTHON_REQUIREMENTS_CACHE,

@@ -241,6 +241,7 @@ class ProcessPythonEnvironmentManagerTest {
         systemEnv.put(PYFLINK_UDF_RUNNER_DIR, "");
         systemEnv.put("PYTHONPATH", "/inherited/pythonpath");
         systemEnv.put("INHERITED_SECRET", "must-not-be-passed-on");
+        systemEnv.put("PYFLINK_WORKER_PROFILE_DIR", tmpDir);
 
         try (ProcessPythonEnvironmentManager environmentManager =
                 new ProcessPythonEnvironmentManager(
@@ -261,6 +262,7 @@ class ProcessPythonEnvironmentManagerTest {
                                     String.join(File.separator, baseDir, PYTHON_FILES_DIR, "file1"),
                                     "/inherited/pythonpath"))
                     .containsEntry("python", "python")
+                    .containsEntry("PYFLINK_WORKER_PROFILE_DIR", tmpDir)
                     .containsEntry("BOOT_LOG_DIR", baseDir)
                     .containsEntry(PYFLINK_GATEWAY_DISABLED, "true");
             // the derivation itself still sees the whole environment

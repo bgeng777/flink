@@ -31,7 +31,12 @@ import {
   TaskManagersItem,
   TaskManagerThreadDump
 } from '@flink-runtime-web/interfaces';
-import { ProfilingDetail, ProfilingList } from '@flink-runtime-web/interfaces/job-profiler';
+import {
+  ProfilingDetail,
+  ProfilingList,
+  ProfilingRequest,
+  PythonWorkerInfo
+} from '@flink-runtime-web/interfaces/job-profiler';
 
 import { ConfigService } from './config.service';
 import { EXPECTED_NOT_FOUND } from './http-context';
@@ -129,15 +134,25 @@ export class TaskManagerService {
       .pipe(map(data => data.url));
   }
 
-  loadProfilingList(taskManagerId: string): Observable<ProfilingList> {
-    return this.httpClient.get<ProfilingList>(`${this.configService.BASE_URL}/taskmanagers/${taskManagerId}/profiler`);
+  loadProfilingList(taskManagerId: string, target: 'jvm' | 'python' = 'jvm'): Observable<ProfilingList> {
+    const query = target === 'python' ? '?target=python' : '';
+    return this.httpClient.get<ProfilingList>(
+      `${this.configService.BASE_URL}/taskmanagers/${taskManagerId}/profiler${query}`
+    );
   }
 
-  createProfilingInstance(taskManagerId: string, mode: string, duration: number): Observable<ProfilingDetail> {
-    const requestParam = { mode, duration };
+  loadPythonWorkers(taskManagerId: string): Observable<PythonWorkerInfo[]> {
+    return this.httpClient
+      .get<{ workers: PythonWorkerInfo[] }>(
+        `${this.configService.BASE_URL}/taskmanagers/${taskManagerId}/python-workers`
+      )
+      .pipe(map(data => data.workers));
+  }
+
+  createProfilingInstance(taskManagerId: string, request: ProfilingRequest): Observable<ProfilingDetail> {
     return this.httpClient.post<ProfilingDetail>(
       `${this.configService.BASE_URL}/taskmanagers/${taskManagerId}/profiler`,
-      requestParam
+      request
     );
   }
 

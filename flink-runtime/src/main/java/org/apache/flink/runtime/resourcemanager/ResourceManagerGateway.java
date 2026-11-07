@@ -38,8 +38,9 @@ import org.apache.flink.runtime.metrics.dump.MetricQueryService;
 import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.rest.messages.LogInfo;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
-import org.apache.flink.runtime.rest.messages.ProfilingInfo.ProfilingMode;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.ThreadDumpInfo;
+import org.apache.flink.runtime.rest.messages.cluster.ProfilingRequestBody;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerInfo;
 import org.apache.flink.runtime.rpc.FencedRpcGateway;
 import org.apache.flink.runtime.rpc.RpcTimeout;
@@ -285,19 +286,19 @@ public interface ResourceManagerGateway
     CompletableFuture<Collection<ProfilingInfo>> requestTaskManagerProfilingList(
             ResourceID taskManagerId, @RpcTimeout Duration timeout);
 
+    /** Lists standalone Python workers on the requested TaskManager. */
+    CompletableFuture<Collection<PythonWorkerInfo>> requestPythonWorkers(
+            ResourceID taskManagerId, @RpcTimeout Duration timeout);
+
     /**
      * Requests the profiling instance from the given {@link TaskExecutor}.
      *
      * @param taskManagerId taskManagerId identifying the {@link TaskExecutor} to get the profiling
      *     from
-     * @param duration profiling duration
-     * @param mode profiling mode {@link ProfilingMode}
+     * @param request profiling parameters and optional Python worker target
      * @param timeout timeout of the asynchronous operation
      * @return Future containing the created profiling information
      */
     CompletableFuture<ProfilingInfo> requestProfiling(
-            ResourceID taskManagerId,
-            int duration,
-            ProfilingInfo.ProfilingMode mode,
-            @RpcTimeout Duration timeout);
+            ResourceID taskManagerId, ProfilingRequestBody request, @RpcTimeout Duration timeout);
 }

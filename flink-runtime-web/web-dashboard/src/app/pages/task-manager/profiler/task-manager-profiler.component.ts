@@ -18,15 +18,16 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { Subject } from 'rxjs';
-import { mergeMap, startWith, takeUntil } from 'rxjs/operators';
+import { forkJoin, merge, of, Subject } from 'rxjs';
+import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
 
 import { HumanizeWatermarkToDatetimePipe } from '@flink-runtime-web/components/humanize-watermark.pipe';
-import { ProfilingDetail } from '@flink-runtime-web/interfaces/job-profiler';
+import { ProfilingDetail, ProfilingRequest, PythonWorkerInfo } from '@flink-runtime-web/interfaces/job-profiler';
 import { StatusService, TaskManagerService } from '@flink-runtime-web/services';
 import { NzAlertModule } from 'ng-zorro-antd/alert';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzCardModule } from 'ng-zorro-antd/card';
+import { NzCheckboxModule } from 'ng-zorro-antd/checkbox';
 import { NzFormModule } from 'ng-zorro-antd/form';
 import { NzIconModule } from 'ng-zorro-antd/icon';
 import { NzInputNumberModule } from 'ng-zorro-antd/input-number';
@@ -43,6 +44,7 @@ import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     NzCardModule,
+    NzCheckboxModule,
     NzFormModule,
     NzInputNumberModule,
     FormsModule,
@@ -59,6 +61,15 @@ import { NzTooltipModule } from 'ng-zorro-antd/tooltip';
 })
 export class TaskManagerProfilerComponent implements OnInit, OnDestroy {
   private readonly destroy$ = new Subject<void>();
+  private readonly refresh$ = new Subject<void>();
+  private autoSelectWorker = false;
+  target: 'JVM' | 'PYTHON' = 'JVM';
+  pythonWorkers: PythonWorkerInfo[] = [];
+  workerId: string | null = null;
+  workerLoadFailed = false;
+  workerUnavailable = false;
+  includeIdle = false;
+  includeNative = false;
   profilingList: ProfilingDetail[] = [];
   isLoading = true;
   isCreating = false;
@@ -76,41 +87,96 @@ export class TaskManagerProfilerComponent implements OnInit, OnDestroy {
     private cdr: ChangeDetectorRef
   ) {}
 
+  public setTarget(target: 'JVM' | 'PYTHON'): void {
+    this.target = target;
+    this.profilingList = [];
+    this.workerId = null;
+    this.pythonWorkers = [];
+    this.workerLoadFailed = false;
+    this.workerUnavailable = false;
+    this.autoSelectWorker = target === 'PYTHON';
+    this.refresh$.next();
+  }
+
   public createProfilingInstance(): void {
     if (this.profilingList.length > 0 && this.profilingList[0].status === 'RUNNING') {
       this.message.warning('Please wait for last profiling finished.');
       return;
     }
+    let request: ProfilingRequest;
+    if (this.target === 'PYTHON') {
+      if (!this.workerId) {
+        this.message.warning('Select a Python worker to profile.');
+        return;
+      }
+      request = {
+        workerId: this.workerId,
+        duration: this.duration,
+        includeIdle: this.includeIdle,
+        includeNative: this.includeNative
+      };
+    } else {
+      request = { mode: this.selectMode, duration: this.duration };
+    }
     this.isCreating = true;
     const taskManagerId = this.activatedRoute.parent!.snapshot.params.taskManagerId;
-    this.taskManagerService.createProfilingInstance(taskManagerId, this.selectMode, this.duration).subscribe({
-      next: profilingDetail => {
-        this.profilingList.unshift(profilingDetail);
-        this.isCreating = false;
-        this.cdr.markForCheck();
-      },
-      error: () => {
-        this.isCreating = false;
-        this.cdr.markForCheck();
-      }
-    });
+    this.taskManagerService
+      .createProfilingInstance(taskManagerId, request)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.isCreating = false;
+          this.refresh$.next();
+        },
+        error: error => {
+          if (error.status === 409) {
+            this.message.warning('Another profiling session is running on this TaskManager.');
+          }
+          this.isCreating = false;
+          this.cdr.markForCheck();
+        }
+      });
   }
 
   public ngOnInit(): void {
     const taskManagerId = this.activatedRoute.parent!.snapshot.params.taskManagerId;
-    this.statusService.refresh$
+    merge(this.statusService.refresh$, this.refresh$)
       .pipe(
         startWith(true),
-        mergeMap(() => {
+        switchMap(() => {
           this.isLoading = true;
           this.cdr.markForCheck();
-          return this.taskManagerService.loadProfilingList(taskManagerId);
+          return forkJoin({
+            history: this.taskManagerService.loadProfilingList(
+              taskManagerId,
+              this.target === 'PYTHON' ? 'python' : 'jvm'
+            ),
+            workers:
+              this.target === 'PYTHON'
+                ? this.taskManagerService.loadPythonWorkers(taskManagerId).pipe(
+                    catchError(error => {
+                      this.workerUnavailable = error.status === 503;
+                      return of(null);
+                    })
+                  )
+                : of([])
+          });
         }),
         takeUntil(this.destroy$)
       )
       .subscribe({
         next: data => {
-          this.profilingList = data.profilingList;
+          this.profilingList = data.history.profilingList;
+          this.workerLoadFailed = data.workers === null;
+          this.pythonWorkers = data.workers ?? [];
+          if (!this.pythonWorkers.some(worker => worker.id === this.workerId)) {
+            this.workerId = null;
+          }
+          // Auto-select only on entering Python mode; an exited selection must not switch targets.
+          if (this.autoSelectWorker && this.pythonWorkers.length > 0) {
+            this.workerId = this.pythonWorkers.length === 1 ? this.pythonWorkers[0].id : null;
+            this.autoSelectWorker = false;
+          }
           this.isLoading = false;
           this.isEnabled = true;
           this.cdr.markForCheck();

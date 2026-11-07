@@ -116,6 +116,7 @@ import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerLogListHandl
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerProfilingFileHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerProfilingHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerProfilingListHandler;
+import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerPythonWorkerListHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerStdoutFileHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagerThreadDumpHandler;
 import org.apache.flink.runtime.rest.handler.taskmanager.TaskManagersHandler;
@@ -180,6 +181,7 @@ import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerLogsHeaders
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerProfilingFileHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerProfilingHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerProfilingListHeaders;
+import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerPythonWorkerListHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerStdoutFileHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerThreadDumpHeaders;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagersHeaders;
@@ -1065,6 +1067,15 @@ public class WebMonitorEndpoint<T extends RestfulGateway> extends RestServerEndp
 
         // load profiler relative handlers
         if (clusterConfiguration.get(RestOptions.ENABLE_PROFILER)) {
+            handlers.add(
+                    Tuple2.of(
+                            TaskManagerPythonWorkerListHeaders.getInstance(),
+                            new TaskManagerPythonWorkerListHandler(
+                                    leaderRetriever,
+                                    timeout,
+                                    responseHeaders,
+                                    TaskManagerPythonWorkerListHeaders.getInstance(),
+                                    resourceManagerRetriever)));
             final JobManagerProfilingHandler jobManagerProfilingHandler =
                     new JobManagerProfilingHandler(
                             leaderRetriever,

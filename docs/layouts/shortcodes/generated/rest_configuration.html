@@ -126,7 +126,7 @@
             <td><h5>rest.profiling.dir</h5></td>
             <td style="word-wrap: break-word;">System.getProperty("java.io.tmpdir")</td>
             <td>String</td>
-            <td>Profiling result storing directory.</td>
+            <td>Local profiling result directory. Python worker results are stored on the hosting TaskManager. History eviction removes the corresponding files; restarting a process does not restore profiling history from this directory.</td>
         </tr>
         <tr>
             <td><h5>rest.profiling.duration-max</h5></td>
@@ -144,7 +144,13 @@
             <td><h5>rest.profiling.history-size</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>
-            <td>Maximum profiling history instance to be maintained for JobManager or each TaskManager. The oldest instance will be removed on a rolling basis when the history size exceeds this value.</td>
+            <td>Maximum profiling history instance to be maintained for JobManager or each TaskManager. JVM and Python sessions share this limit on a TaskManager. The oldest instance will be removed on a rolling basis when the history size exceeds this value.</td>
+        </tr>
+        <tr>
+            <td><h5>rest.python-profiling.executable</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Absolute path of an administrator-installed py-spy executable. Together with rest.profiling.enabled, enables on-demand profiling of standalone Python workers. The TaskManager must have permission to inspect these processes. No profiling tool is installed automatically.</td>
         </tr>
         <tr>
             <td><h5>rest.retry.delay</h5></td>

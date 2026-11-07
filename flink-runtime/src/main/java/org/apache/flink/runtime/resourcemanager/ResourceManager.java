@@ -62,7 +62,9 @@ import org.apache.flink.runtime.resourcemanager.slotmanager.ResourceEventListene
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.rest.messages.LogInfo;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.ThreadDumpInfo;
+import org.apache.flink.runtime.rest.messages.cluster.ProfilingRequestBody;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerInfo;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
 import org.apache.flink.runtime.rpc.FencedRpcEndpoint;
@@ -912,6 +914,17 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
     }
 
     @Override
+    public CompletableFuture<Collection<PythonWorkerInfo>> requestPythonWorkers(
+            ResourceID taskManagerId, Duration timeout) {
+        final WorkerRegistration<WorkerType> taskExecutor = taskExecutors.get(taskManagerId);
+        if (taskExecutor == null) {
+            return FutureUtils.completedExceptionally(
+                    new UnknownTaskExecutorException(taskManagerId));
+        }
+        return taskExecutor.getTaskExecutorGateway().requestPythonWorkers(timeout);
+    }
+
+    @Override
     public CompletableFuture<Collection<ProfilingInfo>> requestTaskManagerProfilingList(
             ResourceID taskManagerId, Duration timeout) {
         final WorkerRegistration<WorkerType> taskExecutor = taskExecutors.get(taskManagerId);
@@ -928,10 +941,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 
     @Override
     public CompletableFuture<ProfilingInfo> requestProfiling(
-            ResourceID taskManagerId,
-            int duration,
-            ProfilingInfo.ProfilingMode mode,
-            Duration timeout) {
+            ResourceID taskManagerId, ProfilingRequestBody request, Duration timeout) {
         final WorkerRegistration<WorkerType> taskExecutor = taskExecutors.get(taskManagerId);
 
         if (taskExecutor == null) {
@@ -941,7 +951,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
             return FutureUtils.completedExceptionally(
                     new UnknownTaskExecutorException(taskManagerId));
         } else {
-            return taskExecutor.getTaskExecutorGateway().requestProfiling(duration, mode, timeout);
+            return taskExecutor.getTaskExecutorGateway().requestProfiling(request, timeout);
         }
     }
 

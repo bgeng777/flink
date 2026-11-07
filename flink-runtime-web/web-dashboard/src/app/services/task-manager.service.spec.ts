@@ -203,12 +203,18 @@ describe('TaskManagerService', () => {
     });
   });
 
+  it('selects Python history explicitly', async () => {
+    httpClient.get.mockReturnValue(of({ profilingList: [] }));
+    await firstValueFrom(service.loadProfilingList('tm-1', 'python'));
+    expect(httpClient.get).toHaveBeenCalledWith(`${configService.BASE_URL}/taskmanagers/tm-1/profiler?target=python`);
+  });
+
   describe('createProfilingInstance', () => {
     it('posts the requested profiling mode and duration', async () => {
       const profilingDetail = { status: 'RUNNING' } as ProfilingDetail;
       httpClient.post.mockReturnValue(of(profilingDetail));
 
-      const result = await firstValueFrom(service.createProfilingInstance('tm-1', 'ITIMER', 30));
+      const result = await firstValueFrom(service.createProfilingInstance('tm-1', { mode: 'ITIMER', duration: 30 }));
 
       expect(httpClient.post).toHaveBeenCalledWith(`${configService.BASE_URL}/taskmanagers/tm-1/profiler`, {
         mode: 'ITIMER',
@@ -216,6 +222,20 @@ describe('TaskManagerService', () => {
       });
       expect(result).toBe(profilingDetail);
     });
+  });
+
+  it('loads registered Python workers from the routed TaskManager', async () => {
+    const workers = [{ id: 'registered', pid: 123 }];
+    httpClient.get.mockReturnValue(of({ workers }));
+    expect(await firstValueFrom(service.loadPythonWorkers('tm-1'))).toEqual(workers);
+    expect(httpClient.get).toHaveBeenCalledWith(`${configService.BASE_URL}/taskmanagers/tm-1/python-workers`);
+  });
+
+  it('posts Python options to the existing profiler endpoint without a JVM mode', async () => {
+    const request = { workerId: 'registered', duration: 10, includeNative: true, includeIdle: false };
+    httpClient.post.mockReturnValue(of({ status: 'RUNNING' }));
+    await firstValueFrom(service.createProfilingInstance('tm-1', request));
+    expect(httpClient.post).toHaveBeenCalledWith(`${configService.BASE_URL}/taskmanagers/tm-1/profiler`, request);
   });
 
   describe('loadProfilingResult', () => {
