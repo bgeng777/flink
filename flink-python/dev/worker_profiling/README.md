@@ -26,7 +26,8 @@ branch, not an approved/released FLIP.
 The design was compared with the local VVR flamegraph implementation on 2026-10-24.
 Optional native-stack capture and a Python target selector in the existing Profiler UI
 are implemented and validated on Linux AArch64. A local CPU ResNet-18 overhead comparison is available; broader isolated-hardware measurements remain.
-The design records the implementation baseline and remaining work in Appendix A.
+The FLIP summarizes prototype evidence and remaining verification in Appendix A. Detailed local
+reproduction instructions, test counts, and raw experiment links remain in this README.
 
 ## Delivery scope
 
@@ -47,7 +48,7 @@ The revised configuration, memory REST contract and UI are implemented locally. 
 
 The first-release proposal exports a Memray binary for offline flamegraph/stats/tree
 analysis. Startup files share the TM directory/download route but do not enter REST
-history or its retention; this tradeoff is explicit in the FLIP's Open Questions.
+history or its retention; this is the proposed first-release policy in the FLIP body.
 
 See the [tool selection study](Profiler-selection-research.md),
 [framework comparison](Distributed-framework-profiling-research.md), and
@@ -142,7 +143,17 @@ JobID. Shared workers list all associated operators; reports still describe the 
 
 ## Evidence and limitations
 
-Latest revision validation (2026-11-07):
+Latest follow-up validation (2026-11-08):
+
+- Worker association publication failures clean up their temporary files using the existing Flink
+  helper while preserving the original error. A rename-failure regression failed before the fix;
+  all 29 worker-profiling tests and 4 REST integration tests then passed.
+- CPU configuration was renamed to `rest.python-profiling.cpu.executable`, symmetric with memory.
+  Two configuration tests, four REST integration tests using the new name, and one generated-doc
+  completeness test passed. Generated configuration docs were refreshed; style checks passed.
+- These follow-ups did not rerun the standalone experiments or full-repository `clean verify`.
+
+Earlier integrated validation (2026-11-07):
 
 - One TM/one slot with Python managed memory disabled and two unfused operators produces two
   workers. Operator metadata matches independent UDF PID records; targeted CPU captures exclude

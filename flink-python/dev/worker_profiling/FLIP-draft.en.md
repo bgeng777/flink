@@ -28,7 +28,7 @@ under the License.
 | Vote thread | To be started |
 | JIRA | To be created or linked |
 | Target release | To be determined |
-| Updated | 2026-11-07 |
+| Updated | 2026-11-08 |
 
 This proposal adds CPU and memory profiling for Flink-managed standalone Python workers.
 CPU uses external py-spy sampling. Memory supports both direct Tracker integration at worker startup
@@ -37,8 +37,8 @@ part of the formal proposal, with optional, deployment-provided dependencies.
 
 Reuse Flink's existing profiling routes, sessions, result directory, and file/BLOB downloads wherever
 the trigger permits. No new worker-control protocol or generic profiler framework is proposed.
-This document describes the target contracts; Appendix A separates implemented prototype evidence
-from work still required. It follows the [FLIP Template][flip-template].
+This document describes the proposed public contracts and design. The Test Plan defines merge and
+release acceptance requirements; Appendix A summarizes prototype evidence and its limits. It follows the [FLIP Template][flip-template].
 
 ## Motivation
 
@@ -98,13 +98,15 @@ capabilities, making Python worker diagnostics a routine part of job operations.
 The first release covers standalone Python workers on Linux, on the same host and in the same PID
 namespace as the TaskManager (TM). Administrators prepare the tools and permissions in advance.
 Users do not modify UDFs. A worker may serve several operators; reports describe the whole process.
+Here, standalone means a separate Beam Python worker process, not a restriction to Flink Standalone
+cluster deployment.
 
 | Capability in scope | First-release behavior |
 | --- | --- |
 | CPU profiling | Select a running worker in the existing TM Profiler page and capture with external py-spy sampling. |
 | Memory profiling at startup | Enable a startup hook that uses Memray's public `Tracker` API in the worker, with an optional delay and one recording window per worker start. |
 | On-demand memory profiling | Select a running worker and use Memray `attach/detach`, following Ray's integration pattern. This mode is separately enabled and carries an explicit injection-risk warning. |
-| Results | CPU flamegraph SVG and native Memray `.bin` recordings in the configured TM directory; reuse existing file/BLOB downloads. Memray generates HTML, stats, and tree reports offline. |
+| Results | CPU flamegraph SVG and raw Memray `.bin` recordings in the configured TM directory; reuse existing file/BLOB downloads. Memray generates HTML, stats, and tree reports offline. |
 
 Both memory modes are formal features of this proposal. They have different activation and lifecycle
 contracts. Automatic memory HTML rendering, a new viewer, continuous profiling, GPU analysis,
@@ -147,7 +149,7 @@ rest.python-profiling.memory.executable: /opt/diagnostics/bin/memray
 rest.python-profiling.memory.attach-enabled: false
 ```
 
-A diagnostic job can independently enable startup capture:
+With the deployment-wide profiling switch enabled, a job can enable startup capture independently:
 
 ```yaml
 python.memory-profiling.startup.enabled: true
@@ -217,6 +219,8 @@ New Python requests explicitly select `type`:
 No arbitrary tool arguments, output paths, sampling rates, rendering formats, or allocator-tracing
 options are added. Unsupported explicit options fail without fallback. JobManager profiling does not
 accept Python worker requests. Startup capture is configured on the job, not submitted through REST.
+Requests retain the existing JSON object structure. New fields are optional in the schema, while
+request validation enforces the legal JVM/Python combinations. Existing JVM requests need no Python fields.
 
 Acceptance returns HTTP 200 with the existing `RUNNING`, `FINISHED`, or `FAILED` session model.
 Keep `status`, `triggerTime`, `finishedTime`, `duration`, `message`, and `outputFile`. Python responses
@@ -256,7 +260,7 @@ Flink controls that worker's memory capture; the CLI has no Flink session owners
 ### Result directory and retention
 
 Flink generates `python-<uuid>.svg`, `python-memory-<uuid>.bin`, or
-`python-memory-startup-<uuid>.bin` under `rest.profiling.dir`. Write recordings to a temporary name
+`python-memory-startup-<pid>-<uuid>.bin` under `rest.profiling.dir`. Write recordings to a temporary name
 and publish the final filename only after confirmed closure. Do not delete/truncate a recording
 whose writer may still be active.
 
@@ -264,7 +268,9 @@ REST history eviction cleans up its owned artifacts. Known-closed failed capture
 up; stop-unconfirmed recordings remain explicitly incomplete. Startup output is not covered by
 REST history retention: deployment operators own its archival/removal, including incomplete files
 after crashes. Every worker restart may generate another file. This policy must be documented with
-startup enablement; the feature is off by default.
+startup enablement; the feature is off by default. Repeated failovers can accumulate recordings, so
+deployments must plan directory capacity and cleanup. The first release adds no automatic count- or
+age-based eviction for startup files.
 
 Only owned artifacts are removed; never clear the whole directory. Existing BLOB caching remains:
 eviction does not revoke downloaded/cached copies. History is not reconstructed after TM restart,
@@ -288,8 +294,11 @@ neither a renderer subprocess in the worker nor a second artifact schema is need
 | Tool/worker dependency unavailable, platform unsupported, or memory attach disabled | HTTP 503; unrelated capabilities remain usable. |
 | Accepted capture encounters tool, permission, worker-exit, timeout, or storage failure | `FAILED` with diagnostic detail and cleanup status. |
 
-Startup configuration/dependency failures are logged and skip recording without changing ordinary
-UDF startup. This is a control-layer policy, not isolation from failures inside native profiler code.
+Configuration type and syntax errors follow normal Flink configuration parsing and can fail job
+startup. After configuration parsing succeeds, recoverable capture-preparation errors inside the
+worker, such as missing Memray, an unwritable result directory, or invalid window values, are logged
+and skip recording while ordinary UDF startup continues. This does not isolate native profiler
+crashes or deadlocks.
 
 **Memray attach injects executable code into a running worker and can crash or deadlock it, potentially
 causing job failure or recovery.** Memray's documentation recommends this debugging mechanism for
@@ -335,8 +344,10 @@ import Memray; enabled preparation does not start tracking until the selected tr
 ### Worker identity and registration cleanup
 
 Beam remains responsible for worker creation, exit and restart. The TM needs the real SDK harness
-PID, not a shell-wrapper PID. Reuse existing startup/process management and the prototype's small
-private registration bridge where Beam cannot expose that identity directly.
+PID, not a shell-wrapper PID. Reuse existing startup/process management; Python boot records its
+actual PID and start identity in the TM-managed private temporary directory. Its lifetime follows
+the existing TM working directory. An abrupt TM exit does not guarantee immediate deletion;
+reinitializing that temporary directory clears leftover registrations.
 
 Validate liveness, process start identity, and ownership at discovery, creation, before invoking a
 tool, and before publishing results. Both external tools ultimately attach by PID; validation and
@@ -356,8 +367,8 @@ without another process pool, reference count, or ownership service. Updates hap
 lifecycle boundaries, never per record or bundle. Association records are written to a temporary
 file and published atomically. If writing or publishing fails with an I/O error, the registration
 call attempts to remove its temporary file immediately, preserving the original error for caller
-logging. Cleanup does not depend on a later operator close or replace the original error if it fails.
-The Beam 2.75.0 integration point is
+logging. Cleanup does not depend on a later operator close, and a cleanup failure must not replace
+the original error. The Beam 2.75.0 integration point is
 `FnApiControlClient.getWorkerId()`; only `flink-python` depends on that Beam class. This association
 follows Flink's current stage/environment lifecycle; future Beam environment rotation or load
 balancing would require revalidation.
@@ -376,7 +387,6 @@ to request sampling termination and result generation, then allows a bounded fin
 kill is not a valid result. Initialization consumes part of this window, so actual sampling can be
 shorter than requested. Retain the tool's duration as an additional exit condition: in validated
 py-spy 0.4.3 it counts sampling intervals, and slow native unwinding can exceed the nominal duration.
-
 
 Cancel and await the owning TM's sampler during shutdown without closing a JVM-shared profiling
 service used by another TM. Late worker discovery must not start a capture after shutdown begins.
@@ -421,8 +431,12 @@ For a REST memory request:
    assumption. Then validate/publish the recording and mark the existing session `FINISHED`.
 5. If stop cannot be confirmed, mark `FAILED` with an explicit stop-unconfirmed message. Do not
    publish success, unlink a possibly active recording, or automatically attach again. Keep the
-   active-session reservation until stop is confirmed or the worker exits. TM shutdown has a bounded
-   diagnostic wait; worker process termination remains part of the existing task/Beam lifecycle.
+   active-session reservation until the original worker exits if cleanup cannot confirm closure.
+   Because admission is JVM-wide, further JVM, Python CPU, and memory REST captures in that JVM
+   remain busy. The first release provides no force-unlock endpoint. If diagnostic access must be
+   restored sooner, users can terminate the original worker through normal job stop/restart procedures
+   after considering the business impact; the profiler does not terminate it automatically. TM shutdown
+   has a bounded diagnostic wait, with worker termination owned by the existing task/Beam lifecycle.
 
 The target-side timer is a fallback if the TM disappears, not proof of completion or a hard bound.
 Memray 1.20.0 clears its “last tracker” reference before finishing Tracker closure; therefore
@@ -440,8 +454,8 @@ Memray for the capture window; its CLI cannot distinguish an unrelated manual at
 Publish a tested matrix of Flink, CPython, tool version, Linux architecture and native mode. Maintainers
 own the invocation/API, stop, failure and artifact contracts for those combinations; operators own
 installation and deployment permissions. Tool upgrades require a repeatable real-tool smoke test
-that fails if capture fails, plus lifecycle tests. The current exploratory smoke script's successful
-job exit alone is not a compatibility pass. No version-adapter framework is required.
+plus lifecycle tests. Acceptance checks capture completion, stop confirmation, and artifacts, not
+just successful job exit. No version-adapter framework is required.
 
 Ray provides py-spy through `ray[default]` and Memray through `ray[observability]`; its node managers
 check tool availability. Adopt optional preparation, not the assumption that an agent's PATH proves
@@ -465,9 +479,9 @@ feature; it is neither renamed nor silently replaced. Concurrent cProfile/Memray
 worker is not supported.
 
 The Python interfaces and configuration in this draft become public commitments when released.
-The four `PYFLINK_MEMRAY_*` variables in the local startup prototype are not the proposed public
-interface or aliases; migrate that unpublished prototype to the formal configuration. The local
-CPU request without `type` also has no released compatibility commitment.
+Internal environment variables transport configuration from the TM to workers and are not user
+configuration entry points. The unpublished prototype establishes no compatibility aliases; users
+configure and invoke profiling through the interfaces described here.
 
 Implementation can be reviewed in separate CPU, startup-memory, and attach-memory changes under this
 one FLIP. Memory remains in scope; attach acceptance requires its warning, disabled default and real
@@ -475,6 +489,9 @@ lifecycle evidence. Existing worker processes need restart to pick up dependency
 startup settings. No checkpoint/savepoint format or UDF signature changes are involved.
 
 ## Test Plan
+
+These are acceptance requirements for the relevant implementation changes and release. Appendix A
+summarizes completed prototype validation and its limits.
 
 | Area | Required evidence |
 | --- | --- |
@@ -504,68 +521,35 @@ Select modest diagnostic windows and workloads for the initial support matrix.
 | Automatically render every memory report or expose every Memray option | Preserve one native binary artifact and use Memray's existing offline tools first. |
 | Central scheduling and live REST history for startup windows | Requires additional reporting/admission coordination. The first release explicitly uses log/file discovery and deployment-owned retention for this mode. |
 
-## Open Questions
+## Appendix A: Prototype validation
 
-These decisions need evidence and community agreement before voting; they are not implemented claims.
+These local experiments demonstrate integration feasibility, not community approval, a release support
+matrix, or a production overhead guarantee. The prototype used Linux AArch64, CPython 3.11.18,
+Beam 2.75.0, py-spy 0.4.3, and Memray 1.20.0.
 
-| ID | Decision and proposed direction |
+| Scenario | Observed result |
 | --- | --- |
-| D1 | Validate Memray CLI/worker closure and fallback-timer behavior, including debugger cancellation and its effect on normal worker exit. Adopt attach only with the stated risk gate and truthful stop-unconfirmed semantics. |
-| D2 | Confirm first-release Linux/CPython/tool combinations, acceptable overhead and recording sizes using real PyTorch workloads. |
-| D3 | Use a minimal operator association list to select among workers on one TM; validate separate workers, shared workers, and cleanup while retaining process-level reports. |
-| D4 | Confirm the deliberate first-release tradeoff: startup files use the common directory/download route but do not enter REST history or its retention. |
+| One TM, one slot, two unfused Python operators | Disabling Python managed memory produced two workers, with operator/subtask/attempt metadata matching independently reported UDF PIDs. Individual CPU captures distinguished their hotspots; Memray recorded the selected PID's allocation stack. With managed memory enabled, one worker listed both operators and its CPU capture included both hotspots. |
+| Two TMs with CPU ResNet-18 inference | The workers could be profiled independently; cross-TM handle isolation, same-JVM admission conflicts, and matching downloads were verified. Three rounds of throughput and UDF-latency comparisons ran with a single native thread and the default six-thread pool. Five active native threads were absent from py-spy SVGs in the default-pool experiments. |
+| Capture completion and lifecycle | Ordinary/native CPU, startup Tracker, and native Memray attach produced readable artifacts with matching downloads while jobs continued. Cancellation removed associations and old handles were rejected. A py-spy native-duration overrun was fixed with timed SIGINT and bounded finalization, then validated through a real REST request. |
+| Protocol and regressions | Targeted configuration, discovery, REST/RPC, history, download, frontend, and Python lifecycle tests ran. Temporary-file cleanup after association publication failure was verified with a failing regression before the fix and a passing test afterward. Generated REST/configuration documentation and compatibility checks passed. |
 
-## Appendix A: Current implementation and remaining work
+Overhead comparisons used short windows on a local VM. The complete three-round matrix predates the
+CPU stop fix; only native completion was revalidated afterward, without repeating the full overhead
+matrix. These results therefore establish neither a fixed production overhead nor complete native
+CPU coverage.
 
-The local changes build on `7b5af6de1e1` (upstream baseline
-`8d01380ff5bf9892462ef9808b1b56fd9723f54d`) and implement the revised POC contracts.
-This is not a community-approved or released feature.
-
-| Implemented and validated | Remaining work |
-| --- | --- |
-| `CPU`/`MEMORY` request types, worker memory availability, formal configuration, JVM-wide session limit and stale registration reclamation. | Broader tool, Python and platform combinations. |
-| Reused REST/RPC/history/download/UI; previous validation passed 73 runtime, 16 Python memory, 8 environment-manager and 37 frontend tests; REST snapshot and generated configuration documentation updated. | Full-repository `clean verify`. |
-| Real Memray 1.20.0 native attach/detach capture, separate enable flag and UI acknowledgment, stop-unconfirmed reservation and incomplete-download rejection. | More complete native crash/deadlock, permission and debugger failure experiments. |
-| Formally configured startup Tracker; inherited legacy environment inputs cannot bypass disabled configuration; shared directory and download endpoint. | Deployment combinations such as archives, and practical disk-capacity management. |
-| Both memory modes on Linux AArch64, CPython 3.11.18 and Beam 2.75.0 produce readable allocation stacks and matching downloads while jobs remain running; earlier py-spy 0.4.3 CPU/native evidence is retained. | Broader models, architectures and deployments; longer comparisons on isolated hardware. |
-
-Subsequent validation used a 6 GiB VM with two independent JVM TMs and one slot each. Image-buffer
-and CPU ResNet-18 jobs both passed simultaneous two-worker CPU/native Memray captures, cross-TM
-handle isolation, same-TM admission conflicts and matching downloads while workers remained alive.
-Three rounds of ordinary CPU/memory comparisons were completed with native pools limited to one
-and with the default six threads, preserving throughput, UDF latency and per-thread CPU evidence.
-Five active native threads were absent from py-spy SVGs in the default-pool experiments; identifying
-the PyTorch call chain does not establish complete native CPU coverage.
-
-The experiment also exposed py-spy's nominal-duration overrun. The POC now uses timed SIGINT,
-bounded finalization and forced termination only as a failure fallback. Seventy runtime tests pass,
-and the real REST request that previously timed out now completes. The three-round overhead matrix
-predates that fix; native completion was revalidated afterward without rerunning the full matrix.
-Thread-limit calibration and the test environment's Metaspace failure are retained in the report.
-
-See the [two-TM/PyTorch/overhead/stop experiments](../../../output/playwright/pyflink-20261107/torch-multiworker/run.md),
-[memory integration report](../../../output/playwright/pyflink-20261107/formal-memory/run.md), and
-[memory usage instructions](Memory-experiment.md). These are local short-window observations, not
-production overhead guarantees. Native fault injection, more versions and full-repository checks remain.
-
-A subsequent single-TM, one-slot run disabled `python.fn-execution.memory.managed` and Python/operator
-chaining. Two unfused operators produced separate workers; independent UDF PID records matched their
-operator/subtask/attempt metadata. Individual CPU captures contained the selected hotspot and excluded
-the other; Memray recorded the selected PID and allocation stack. A managed-memory control shared one
-worker, listed both operators and captured both hotspots. Cancellation removed all association records;
-stale handles returned 404 and overlapping captures returned 409. See the
-[single-TM evidence and screenshots](../../../output/playwright/pyflink-20261107/single-tm-workers/run.md).
-
-A subsequent fix cleans up temporary association files when registration fails. A rename-failure
-regression first reproduced the leftover file before the fix, then passed afterward. This revision
-passed 29 worker-profiling tests and 4 REST integration tests, plus Spotless, Checkstyle and diff
-checks. The standalone experiment and full-repository tests were not rerun for this cleanup fix.
+Relevant fault and deployment combinations still need validation before merge, and additional release
+platforms/versions need an expanded real-tool matrix. More complete native crash/deadlock,
+permission/debugger failure, archives, and disk-capacity experiments, plus full-repository
+`clean verify`, remain. Reproduction scripts, raw measurements, and screenshots are maintained
+separately with implementation evidence; community discussion should include accessible attachments.
 
 ## References
 
-- [Tool selection research](Profiler-selection-research.md).
-- [Distributed Python framework comparison](Distributed-framework-profiling-research.md).
-- [Ray 2.60.0 / Memray 1.20.0 source review](Ray-profiling-research.md).
+- [Existing JVM profiler: FLIP-375][flip-375].
+- [Memray Tracker API][memray-api] and [attach caveats][memray-attach].
+- [Ray profiling integration][ray-manager].
 - [FLIP process and public-interface commitments][flip-process].
 
 [flip-template]: https://cwiki.apache.org/confluence/spaces/FLINK/pages/65145553/FLIP+Template
