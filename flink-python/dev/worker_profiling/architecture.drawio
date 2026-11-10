@@ -19,85 +19,145 @@ under the License.
 -->
 <mxfile host="drawio" version="30.2.6">
   <diagram name="Python worker profiling">
-    <mxGraphModel dx="1300" dy="850" grid="1" gridSize="10" page="1" pageWidth="1400" pageHeight="880">
+    <mxGraphModel page="0" background="#ffffff">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="2" value="REST client" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="40" y="140" width="150" height="70" />
+        <mxCell id="2" value="&lt;b&gt;PyFlink worker profiling&lt;/b&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=32;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1000" height="45" as="geometry" />
         </mxCell>
-        <mxCell id="3" value="JobManager&#10;REST handlers" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="270" y="140" width="190" height="70" />
+        <mxCell id="3" value="Existing Flink control path · external CPU sampling · in-process memory tracing" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=19;" vertex="1" parent="1">
+          <mxGeometry x="40" y="65" width="1500" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="4" value="ResourceManager&#10;route to TM" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="540" y="140" width="190" height="70" />
+        <mxCell id="4" value="TaskManager host / Pod · same PID namespace" style="swimlane;startSize=45;container=1;pointerEvents=0;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="840" y="120" width="740" height="850" as="geometry" />
         </mxCell>
-        <mxCell id="5" value="TaskManager&#10;profiling service" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="810" y="140" width="220" height="70" />
+        <mxCell id="5" value="TaskManager JVM" style="swimlane;startSize=45;container=1;pointerEvents=0;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=1.5;spacing=12;" vertex="1" parent="4">
+          <mxGeometry x="20" y="60" width="700" height="230" as="geometry" />
         </mxCell>
-        <mxCell id="6" value="Worker registry&#10;PID + start token" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="810" y="350" width="220" height="70" />
+        <mxCell id="6" value="&lt;b&gt;ProfilingService&lt;/b&gt;&lt;br&gt;Separate JVM / Python slots&lt;br&gt;One Python capture; bounded history" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=1.5;spacing=12;" vertex="1" parent="5">
+          <mxGeometry x="20" y="60" width="310" height="120" as="geometry" />
         </mxCell>
-        <mxCell id="7" value="py-spy process&#10;bounded capture" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="1110" y="350" width="180" height="90" />
+        <mxCell id="7" value="&lt;b&gt;Worker discovery&lt;/b&gt;&lt;br&gt;PID + process identity&lt;br&gt;Job / operator / subtask" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;spacing=12;dashed=1;dashPattern=6 4;" vertex="1" parent="5">
+          <mxGeometry x="390" y="60" width="290" height="120" as="geometry" />
         </mxCell>
-        <mxCell id="8" value="Python SDK worker&#10;shared process" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="1110" y="600" width="180" height="90" />
+        <mxCell id="8" value="&lt;b&gt;Flink Web UI / REST&lt;/b&gt;&lt;br&gt;Select worker and capture&lt;br&gt;View status and download" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="210" width="260" height="120" as="geometry" />
         </mxCell>
-        <mxCell id="9" value="Profile artifacts&#10;Transient BLOB download" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="810" y="600" width="220" height="90" />
+        <mxCell id="9" value="&lt;b&gt;JobManager REST&lt;/b&gt;&lt;br&gt;ResourceManager routes&lt;br&gt;requests to the target TM" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="440" y="210" width="300" height="120" as="geometry" />
         </mxCell>
-        <mxCell id="10" value="PYTHON WORKER PROFILING INTEGRATION" style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;fillColor=none;strokeColor=none;fontSize=25;align=left;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="40" y="30" width="820" height="50" />
+        <mxCell id="10" value="&lt;b&gt;Tool subprocesses&lt;/b&gt;&lt;br&gt;py-spy record&lt;br&gt;memray attach / detach" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;spacing=12;dashed=1;dashPattern=6 4;" vertex="1" parent="4">
+          <mxGeometry x="40" y="400" width="230" height="150" as="geometry" />
         </mxCell>
-        <mxCell id="11" value="Reuses Flink profiling sessions, history, concurrency control and BLOB download.&#10;Only worker discovery and bounded py-spy execution are added; operator ownership is deferred." style="rounded=1;whiteSpace=wrap;html=1;fontSize=16;fillColor=#dae8fc;strokeColor=#6c8ebf;fillColor=none;strokeColor=none;fontSize=16;align=left;" vertex="1" parent="1">
-          <mxGeometry as="geometry" x="40" y="760" width="1250" height="80" />
+        <mxCell id="11" value="Python worker process" style="swimlane;startSize=45;container=1;pointerEvents=0;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=1.5;spacing=12;" vertex="1" parent="4">
+          <mxGeometry x="370" y="350" width="330" height="350" as="geometry" />
         </mxCell>
-        <mxCell id="12" value="start / status" source="2" target="3" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=1;exitY=0.5;entryX=0;entryY=0.5;">
-          <mxGeometry as="geometry" relative="1" />
+        <mxCell id="12" value="&lt;b&gt;Beam SDK harness + UDFs&lt;/b&gt;&lt;br&gt;May serve multiple operators" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=1.5;spacing=12;" vertex="1" parent="11">
+          <mxGeometry x="20" y="60" width="290" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="13" value="RPC" source="3" target="4" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=1;exitY=0.5;entryX=0;entryY=0.5;">
-          <mxGeometry as="geometry" relative="1" />
+        <mxCell id="13" value="&lt;b&gt;Memray Tracker&lt;/b&gt;&lt;br&gt;Started by boot hook&lt;br&gt;or injected by attach" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;spacing=12;dashed=1;dashPattern=6 4;" vertex="1" parent="11">
+          <mxGeometry x="20" y="200" width="290" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="14" value="RPC" source="4" target="5" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=1;exitY=0.5;entryX=0;entryY=0.5;">
-          <mxGeometry as="geometry" relative="1" />
+        <mxCell id="14" value="&lt;b&gt;TM local result directory: rest.profiling.dir&lt;/b&gt;&lt;br&gt;CPU .svg · Memory .bin" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=1.5;spacing=12;" vertex="1" parent="4">
+          <mxGeometry x="50" y="750" width="640" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="15" value="resolve worker handle" source="5" target="6" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=0.35;exitY=1;entryX=0.35;entryY=0;">
-          <mxGeometry as="geometry" relative="1" />
+        <mxCell id="15" value="&lt;b&gt;Downloaded reports&lt;/b&gt;&lt;br&gt;CPU SVG: open in a browser&lt;br&gt;Memray binary: offline flamegraph / stats / tree" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="860" width="640" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="16" value="launch / cancel" source="5" target="7" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=1;exitY=0.5;entryX=0.5;entryY=0;">
-          <mxGeometry as="geometry" relative="1">
+        <mxCell id="16" value="&lt;b&gt;Two memory capture entry points&lt;/b&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=24;" vertex="1" parent="1">
+          <mxGeometry x="40" y="420" width="710" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="17" value="&lt;b&gt;Memray API integration&lt;/b&gt;&lt;br&gt;Job config → worker boot → admission → Tracker&lt;br&gt;Optional delay; shares the Python capture slot." style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=20;" vertex="1" parent="1">
+          <mxGeometry x="40" y="480" width="710" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="18" value="&lt;b&gt;On-demand attach&lt;/b&gt;&lt;br&gt;Profiler request → Memray CLI → Tracker&lt;br&gt;Separate opt-in and an explicit injection-risk warning." style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=20;" vertex="1" parent="1">
+          <mxGeometry x="40" y="620" width="710" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="19" value="Both memory modes record allocations inside the worker.&lt;br&gt;CPU sampling runs outside the worker." style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=19;" vertex="1" parent="1">
+          <mxGeometry x="40" y="760" width="710" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="20" value="HTTP" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="8" target="9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="21" value="existing RPC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="9" target="6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="22" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="6" target="7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="23" value="launch / cancel" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=0.35;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="6" target="10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="24" value="CPU samples" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=1;exitY=0.2;entryX=0;entryY=0.5;" edge="1" parent="1" source="10" target="12">
+          <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="1200" y="175" />
+              <mxPoint x="1160" y="550" />
+              <mxPoint x="1160" y="575" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="17" value="sample Python stacks" source="7" target="8" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=0.75;exitY=1;entryX=0.75;entryY=0;">
-          <mxGeometry as="geometry" relative="1" />
-        </mxCell>
-        <mxCell id="18" value="boot registration" source="8" target="6" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=0;exitY=0.5;entryX=1;entryY=0.7;">
-          <mxGeometry as="geometry" relative="1">
+        <mxCell id="25" value="attach / detach" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=1;exitY=0.8;entryX=0;entryY=0.5;" edge="1" parent="1" source="10" target="13">
+          <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="1070" y="645" />
-              <mxPoint x="1070" y="399" />
+              <mxPoint x="1160" y="640" />
+              <mxPoint x="1160" y="725" />
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="19" value="bounded output" source="7" target="9" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=1;exitY=0.5;entryX=0.5;entryY=1;">
-          <mxGeometry as="geometry" relative="1">
+        <mxCell id="26" value="PID + Beam ID" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=1;exitY=0.12;entryX=1;entryY=0.5;dashed=1;" edge="1" parent="1" source="11" target="7">
+          <mxGeometry relative="1" as="geometry">
             <Array as="points">
-              <mxPoint x="1330" y="395" />
-              <mxPoint x="1330" y="730" />
-              <mxPoint x="920" y="730" />
+              <mxPoint x="1560" y="512" />
+              <mxPoint x="1560" y="300" />
             </Array>
+            <mxPoint x="-100" y="20" as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="20" value="existing result download" source="9" target="3" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontSize=13;exitX=0;exitY=0.5;entryX=0.5;entryY=1;">
-          <mxGeometry as="geometry" relative="1">
-            <Array as="points">
-              <mxPoint x="365" y="645" />
-            </Array>
-          </mxGeometry>
+        <mxCell id="27" value="CPU SVG" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.2;entryY=0;" edge="1" parent="1" source="10" target="14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="28" value="Memray binary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.8;entryY=0;" edge="1" parent="1" source="13" target="14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="29" value="existing BLOB / download" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#475569;strokeWidth=2;endArrow=block;endFill=1;fontFamily=Helvetica;fontSize=16;labelBackgroundColor=#ffffff;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="14" target="15">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="30" value="" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1010" width="24" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="31" value="Flink control path" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=17;" vertex="1" parent="1">
+          <mxGeometry x="75" y="1005" width="330" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="32" value="" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="430" y="1010" width="24" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="33" value="Optional external tools" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=17;" vertex="1" parent="1">
+          <mxGeometry x="465" y="1005" width="330" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="34" value="" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="820" y="1010" width="24" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="35" value="Worker process" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=17;" vertex="1" parent="1">
+          <mxGeometry x="855" y="1005" width="330" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="36" value="" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=1.5;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="1010" width="24" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="37" value="Artifacts / reports" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fontFamily=Helvetica;fontSize=19;fontColor=#172b4d;fillColor=#ffffff;strokeColor=#94a3b8;strokeWidth=1.5;spacing=12;text;strokeColor=none;fillColor=none;align=left;spacing=0;fontSize=17;" vertex="1" parent="1">
+          <mxGeometry x="1245" y="1005" width="330" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="38" value="" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#475569;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="36" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="39" value="Existing / extended" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontFamily=Helvetica;fontSize=17;fontColor=#172b4d;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="90" y="135" width="280" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="40" value="" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#475569;strokeWidth=2;dashed=1;dashPattern=6 4;" vertex="1" parent="1">
+          <mxGeometry x="400" y="140" width="36" height="22" as="geometry" />
+        </mxCell>
+        <mxCell id="41" value="New integration" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontFamily=Helvetica;fontSize=17;fontColor=#172b4d;spacing=0;" vertex="1" parent="1">
+          <mxGeometry x="450" y="135" width="280" height="32" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

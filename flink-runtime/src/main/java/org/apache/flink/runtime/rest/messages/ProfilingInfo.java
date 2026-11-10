@@ -133,6 +133,7 @@ public class ProfilingInfo implements ResponseBody, Serializable {
 
     public ProfilingInfo fail(String message) {
         this.status = ProfilingStatus.FAILED;
+        this.outputFile = null;
         this.message = message;
         this.finishedTime = System.currentTimeMillis();
         return this;

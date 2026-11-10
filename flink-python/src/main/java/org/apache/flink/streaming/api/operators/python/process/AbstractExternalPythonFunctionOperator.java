@@ -26,16 +26,15 @@ import org.apache.flink.python.PythonFunctionRunner;
 import org.apache.flink.python.PythonOptions;
 import org.apache.flink.python.env.PythonDependencyInfo;
 import org.apache.flink.python.env.process.ProcessPythonEnvironmentManager;
+import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.taskmanager.TaskManagerRuntimeInfo;
+import org.apache.flink.runtime.util.profiler.ProfilingService;
 import org.apache.flink.runtime.util.profiler.PythonWorkerRegistry;
 import org.apache.flink.streaming.api.operators.python.AbstractPythonFunctionOperator;
 import org.apache.flink.streaming.api.runners.python.beam.BeamPythonFunctionRunner;
 import org.apache.flink.table.functions.python.PythonEnv;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -54,7 +53,7 @@ public abstract class AbstractExternalPythonFunctionOperator<OUT>
     protected transient PythonFunctionRunner pythonFunctionRunner;
 
     private transient ExecutorService flushThreadPool;
-    private transient Path pythonOperatorRegistration;
+    private transient Runnable unregisterPythonOperator;
 
     public AbstractExternalPythonFunctionOperator(Configuration config) {
         super(config);
@@ -65,35 +64,24 @@ public abstract class AbstractExternalPythonFunctionOperator<OUT>
         super.open();
         this.pythonFunctionRunner = createPythonFunctionRunner();
         this.pythonFunctionRunner.open(config);
-        final TaskManagerRuntimeInfo taskManagerInfo =
-                getContainingTask().getEnvironment().getTaskManagerInfo();
+        final Environment environment = getContainingTask().getEnvironment();
+        final TaskManagerRuntimeInfo taskManagerInfo = environment.getTaskManagerInfo();
         if (taskManagerInfo.getConfiguration().get(RestOptions.ENABLE_PROFILER)) {
-            try {
-                pythonOperatorRegistration =
-                        new PythonWorkerRegistry(taskManagerInfo.getTmpWorkingDirectory())
-                                .registerOperator(
-                                        ((BeamPythonFunctionRunner) pythonFunctionRunner)
-                                                .getWorkerId(),
-                                        getContainingTask()
-                                                .getEnvironment()
-                                                .getExecutionId()
-                                                .toString(),
-                                        new PythonWorkerInfo.Operator(
-                                                getContainingTask()
-                                                        .getEnvironment()
-                                                        .getJobID()
-                                                        .toString(),
-                                                getOperatorID().toString(),
-                                                getOperatorConfig().getOperatorName(),
-                                                getRuntimeContext()
-                                                        .getTaskInfo()
-                                                        .getIndexOfThisSubtask(),
-                                                getRuntimeContext()
-                                                        .getTaskInfo()
-                                                        .getAttemptNumber()));
-            } catch (IOException e) {
-                LOG.warn("Could not register Python operator for profiling", e);
-            }
+            unregisterPythonOperator =
+                    PythonWorkerRegistry.getOrCreate(
+                                    environment.getSharedResources(),
+                                    taskManagerInfo.getTmpWorkingDirectory())
+                            .registerOperator(
+                                    ((BeamPythonFunctionRunner) pythonFunctionRunner).getWorkerId(),
+                                    environment.getExecutionId().toString(),
+                                    new PythonWorkerInfo.Operator(
+                                            environment.getJobID().toString(),
+                                            getOperatorID().toString(),
+                                            getOperatorConfig().getOperatorName(),
+                                            getRuntimeContext()
+                                                    .getTaskInfo()
+                                                    .getIndexOfThisSubtask(),
+                                            getRuntimeContext().getTaskInfo().getAttemptNumber()));
         }
         this.flushThreadPool = Executors.newSingleThreadExecutor();
     }
@@ -111,13 +99,9 @@ public abstract class AbstractExternalPythonFunctionOperator<OUT>
                 flushThreadPool = null;
             }
         } finally {
-            if (pythonOperatorRegistration != null) {
-                try {
-                    Files.deleteIfExists(pythonOperatorRegistration);
-                } catch (IOException e) {
-                    LOG.warn("Could not remove Python operator profiling registration", e);
-                }
-                pythonOperatorRegistration = null;
+            if (unregisterPythonOperator != null) {
+                unregisterPythonOperator.run();
+                unregisterPythonOperator = null;
             }
             super.close();
         }
@@ -179,6 +163,7 @@ public abstract class AbstractExternalPythonFunctionOperator<OUT>
             final Configuration tmConfig = taskManagerInfo.getConfiguration();
             // Explicit empty overrides are necessary: Beam also inherits the TM process
             // environment.
+            environment.put("PYFLINK_PROFILING_LOCK_FILE", "");
             for (String key :
                     new String[] {
                         "PREPARE",
@@ -214,8 +199,15 @@ public abstract class AbstractExternalPythonFunctionOperator<OUT>
                         Boolean.toString(config.get(PythonOptions.PYTHON_PROFILE_ENABLED)));
                 if (startup) {
                     environment.put(
+                            "PYFLINK_PROFILING_LOCK_FILE",
+                            ProfilingService.getInstance(tmConfig)
+                                    .getProfilingLockFile()
+                                    .toString());
+                    environment.put(
                             "PYFLINK_MEMRAY_OUTPUT_DIR",
-                            new java.io.File(tmConfig.get(RestOptions.PROFILING_RESULT_DIR))
+                            new java.io.File(
+                                            ProfilingService.getInstance(tmConfig)
+                                                    .getProfilingResultDir())
                                     .getAbsolutePath());
                     environment.put(
                             "PYFLINK_MEMRAY_DELAY",

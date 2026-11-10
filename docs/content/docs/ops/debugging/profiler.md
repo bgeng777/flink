@@ -138,8 +138,11 @@ Missing tools, permission failures, zero samples or worker exit appear in the fa
 Set `rest.profiling.dir` to the desired local directory on each TaskManager, for example
 `/flink/log/profiling`. Python captures are stored there as `python-<uuid>.svg`; the TaskManager
 must be able to create and write to the directory. The directory is also used for JVM results.
-History eviction deletes completed session files. Failed CPU captures clean up temporary files;
-memory captures retain incomplete files when Tracker shutdown cannot be confirmed.
+Each worker retains its latest successful CPU SVG and memory binary; API and attach share the memory
+result. A new successful capture replaces the previous file of the same type; failure preserves the
+previous successful result. JVM history retains its existing `rest.profiling.history-size` policy.
+Failed CPU captures clean up temporary files; memory captures retain incomplete files when Tracker
+shutdown cannot be confirmed.
 TaskManager restart does not restore history from files. A persistent volume preserves remaining
 files but does not restore profiling sessions; export files separately for long-term retention.
 
@@ -173,10 +176,12 @@ Python timers are not hard deadlines. Missing dependencies and invalid settings 
 prevent normal worker startup.
 
 Completed startup files are named `python-memory-startup-<pid>-<uuid>.bin` in the shared result directory.
-Their filenames are logged and can be downloaded using the existing TaskManager profiler file endpoint.
-Startup captures do not enter REST session history or consume its active-session slot. Deployment
-operators own their retention and disk-space management. The earlier `PYFLINK_MEMRAY_*` environment
-inputs are private transport details, not supported configuration or aliases.
+Startup captures appear in the same `?target=python` status query as on-demand captures, with downloads
+through the existing TaskManager profiler file endpoint. JVM profiling, Python CPU and both memory
+modes share one active slot per Flink JVM. A startup delay does not reserve the slot; if another
+capture is active when the delay ends, the worker logs and skips that window. Unconfirmed shutdown
+retains the slot until the original worker exits. Internal environment variables are transport
+details rather than supported configuration or aliases.
 
 For an on-demand capture, explicitly enable attach before starting the workers:
 
@@ -193,8 +198,9 @@ automated REST callers must make the same operational decision.
 {{< /hint >}}
 
 Choose **Python worker**, **Memory**, the worker and the duration in the Profiler tab. Worker discovery
-reports `memoryProfilingAvailable` only for a prepared, compatible worker. A pending or active startup
-capture rejects attach with HTTP 409. An unavailable or disabled attach facility returns HTTP 503.
+reports `memoryAttachAvailable` only for a prepared, compatible worker. An active capture in the
+same Flink JVM rejects attach with HTTP 409; a delayed startup window does not reserve admission.
+An unavailable or disabled attach facility returns HTTP 503.
 For REST, submit:
 
 ```json

@@ -28,6 +28,7 @@ import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
 import org.apache.flink.runtime.minicluster.MiniCluster;
 import org.apache.flink.runtime.minicluster.MiniClusterConfiguration;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
+import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.cluster.ProfilingRequestBody;
 import org.apache.flink.runtime.rpc.RpcServer;
 import org.apache.flink.runtime.rpc.RpcUtils;
@@ -42,6 +43,7 @@ import org.apache.flink.util.FlinkExpectedException;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -287,6 +289,17 @@ class PythonProfilingRestITCase {
             assertThat(download.body()).contains("TEST FIXTURE");
             assertThat(download.body())
                     .isEqualTo(Files.readString(temporary.resolve("results").resolve(file)));
+            Files.delete(sampler);
+            assertThat(
+                            post(base, prefix + "/profiler", Map.of("workerId", id, "duration", 1))
+                                    .statusCode())
+                    .isEqualTo(503);
+            Files.writeString(sampler, "#!/bin/sh\nexit 1\n");
+            assertThat(
+                            post(base, prefix + "/profiler", Map.of("workerId", id, "duration", 1))
+                                    .statusCode())
+                    .isEqualTo(503);
+
             final String pendingFile = "python-memory-test.bin.inprogress";
             Files.writeString(temporary.resolve("results").resolve(pendingFile), "incomplete");
             for (String route : List.of(prefix + "/profiler/", "/jobmanager/profiler/")) {
@@ -314,6 +327,10 @@ class PythonProfilingRestITCase {
     }
 
     private String registerWorker(Process worker, int taskManagerIndex) throws Exception {
+        return registerWorker(worker, taskManagerDirectory(taskManagerIndex));
+    }
+
+    private Path taskManagerDirectory(int taskManagerIndex) throws Exception {
         final Path workingDirectory;
         try (Stream<Path> directories = Files.list(temporary)) {
             workingDirectory =
@@ -327,7 +344,7 @@ class PythonProfilingRestITCase {
                             .orElseThrow()
                             .resolve("tm_" + taskManagerIndex + "/tmp");
         }
-        return registerWorker(worker, workingDirectory);
+        return workingDirectory;
     }
 
     private String registerWorker(Process worker, Path workingDirectory) throws Exception {
@@ -351,6 +368,89 @@ class PythonProfilingRestITCase {
 
     @Test
     @Timeout(30)
+    void startupCaptureUsesExistingStatusAndDownload() throws Exception {
+        final Configuration configuration = new Configuration();
+        configuration.set(RestOptions.ENABLE_PROFILER, true);
+        final Path results = temporary.resolve("results");
+        configuration.set(RestOptions.PROFILING_RESULT_DIR, results.toString());
+        configuration.set(RestOptions.BIND_PORT, "0");
+        configuration.set(ClusterOptions.PROCESS_WORKING_DIR_BASE, temporary.toString());
+        final Process worker = new ProcessBuilder("/bin/sh", "-c", "exec sleep 60").start();
+        try (MiniCluster cluster =
+                new MiniCluster(
+                        new MiniClusterConfiguration.Builder()
+                                .setConfiguration(configuration)
+                                .setNumTaskManagers(1)
+                                .build())) {
+            cluster.start();
+            final URI base = cluster.getRestAddress().get(20, TimeUnit.SECONDS);
+            waitUntilCondition(() -> taskManagersRegistered(base, 1), 20L, 500);
+            final String tm =
+                    get(base, "/taskmanagers").path("taskmanagers").get(0).path("id").asText();
+            final String prefix = "/taskmanagers/" + tm;
+            final String id = registerWorker(worker, 0);
+            final Path registry =
+                    PythonWorkerRegistry.getRegistrationDirectory(taskManagerDirectory(0).toFile());
+            final ObjectNode record =
+                    (ObjectNode) mapper.readTree(registry.resolve(id + ".json").toFile());
+            final ProfilingInfo profile =
+                    ProfilingInfo.createPython(
+                            1, new PythonWorkerInfo(id, worker.pid()), false, false);
+            profile.setType(ProfilingInfo.PythonProfilingType.MEMORY);
+            final Path status = registry.resolve("profiles").resolve(id + ".json");
+            Files.createDirectories(status.getParent());
+            record.set("profile", mapper.valueToTree(profile));
+            record.put("stop_confirmed", false);
+            mapper.writeValue(status.toFile(), record);
+            assertThat(
+                            get(base, prefix + "/profiler?target=python")
+                                    .path("profilingList")
+                                    .get(0)
+                                    .path("status")
+                                    .asText())
+                    .isEqualTo("RUNNING");
+            assertThat(get(base, prefix + "/profiler").path("profilingList").isEmpty()).isTrue();
+
+            final String filename =
+                    "python-memory-startup-"
+                            + worker.pid()
+                            + "-"
+                            + UUID.randomUUID().toString().replace("-", "")
+                            + ".bin";
+            Files.createDirectories(results);
+            Files.writeString(results.resolve(filename), "closed memory recording fixture");
+            profile.success(filename);
+            record.set("profile", mapper.valueToTree(profile));
+            record.put("stop_confirmed", true);
+            mapper.writeValue(status.toFile(), record);
+            final JsonNode finished =
+                    get(base, prefix + "/profiler?target=python").path("profilingList").get(0);
+            assertThat(finished.path("status").asText()).isEqualTo("FINISHED");
+            assertThat(finished.path("outputFile").asText()).isEqualTo(filename);
+            assertThat(status).doesNotExist();
+            mapper.writeValue(status.toFile(), record);
+            assertThat(get(base, prefix + "/profiler?target=python").path("profilingList").size())
+                    .isEqualTo(1);
+            assertThat(results.resolve(filename)).isRegularFile();
+            final HttpResponse<String> download =
+                    client.send(
+                            HttpRequest.newBuilder(base.resolve(prefix + "/profiler/" + filename))
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
+            assertThat(download.statusCode()).isEqualTo(200);
+            assertThat(download.body()).isEqualTo("closed memory recording fixture");
+            assertThat(download.headers().firstValue("Content-Type"))
+                    .contains("application/octet-stream");
+        } finally {
+            worker.destroyForcibly();
+            worker.waitFor(5, TimeUnit.SECONDS);
+            ProfilingService.getInstance(configuration).close();
+        }
+    }
+
+    @Test
+    @Timeout(30)
     void rejectsPythonCaptureWhenWorkerLookupCompletesDuringShutdown() throws Exception {
         final Configuration configuration = new Configuration();
         configuration.set(RestOptions.ENABLE_PROFILER, true);
@@ -359,6 +459,9 @@ class PythonProfilingRestITCase {
                 temporary.resolve("unused-sampler").toString());
         configuration.set(
                 RestOptions.PROFILING_RESULT_DIR, temporary.resolve("results").toString());
+        Files.writeString(temporary.resolve("unused-sampler"), "#!/bin/sh\nexit 1\n");
+        Files.setPosixFilePermissions(
+                temporary.resolve("unused-sampler"), PosixFilePermissions.fromString("rwx------"));
         final WorkingDirectory workingDirectory = WorkingDirectory.create(temporary.toFile());
         final TestingRpcService rpc = new TestingRpcService();
         final TestingHighAvailabilityServices ha = new TestingHighAvailabilityServices();

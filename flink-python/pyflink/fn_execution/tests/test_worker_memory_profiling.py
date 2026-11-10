@@ -18,6 +18,7 @@
 ################################################################################
 
 from contextlib import ExitStack
+import json
 import os
 from pathlib import Path
 import sys
@@ -39,6 +40,7 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
         self.output = Path(directory) / 'profiles'
         self.contexts.enter_context(patch.dict(os.environ, {
             'PYFLINK_MEMRAY_OUTPUT_DIR': str(self.output),
+            'PYFLINK_PROFILING_LOCK_FILE': str(Path(directory) / 'capture_lock'),
             'PYFLINK_MEMRAY_DELAY': '0',
             'PYFLINK_MEMRAY_DURATION': '3600',
             'PYFLINK_MEMRAY_MAX_DURATION': '3600',
@@ -81,8 +83,12 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
                 Tracker=Tracker, FileDestination=FileDestination, __version__='test'),
         }))
 
+    def tearDown(self):
+        if profiling._unconfirmed_capture_lock is not None:
+            profiling._unconfirmed_capture_lock.close()
+            profiling._unconfirmed_capture_lock = None
+
     def test_registration_reports_preparation_and_startup_completion(self):
-        import json
         with patch.dict(os.environ, {
             'PYFLINK_WORKER_PROFILE_DIR': str(self.output.parent / 'registry'),
             'WORKER_ID': 'beam-test', 'PYFLINK_MEMRAY_PREPARE': 'true',
@@ -92,10 +98,50 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
             with register_worker() as registration:
                 self.assertTrue(json.loads(registration.read_text())['memory_available'])
                 self.assertEqual(json.loads(registration.read_text())['job_id'], 'job-a')
-                self.assertTrue(json.loads(registration.read_text())['memory_busy'])
+                self.assertFalse(json.loads(registration.read_text())['memory_busy'])
                 with profiling.profile_worker_memory(registration):
                     self.assertTrue(json.loads(registration.read_text())['memory_busy'])
                 self.assertFalse(json.loads(registration.read_text())['memory_busy'])
+
+    def test_recording_preparation_failure_releases_worker(self):
+        with patch.dict(os.environ, {
+            'PYFLINK_WORKER_PROFILE_DIR': str(self.output.parent / 'registry'),
+            'WORKER_ID': 'beam-test', 'PYFLINK_MEMRAY_PREPARE': 'true',
+            'PYFLINK_MEMRAY_ATTACH': 'true',
+        }):
+            with register_worker() as registration:
+                with patch.object(sys.modules['memray'], 'FileDestination',
+                                  side_effect=OSError('cannot open recording')):
+                    with self.assertLogs(level='WARNING'):
+                        with profiling.profile_worker_memory(registration):
+                            pass
+                self.assertFalse(self.entered.is_set())
+                self.assertFalse(json.loads(registration.read_text())['memory_busy'])
+
+    def test_busy_flink_jvm_skips_capture(self):
+        with patch('fcntl.lockf', side_effect=BlockingIOError), \
+                self.assertLogs(level='INFO') as logs:
+            with profiling.profile_worker_memory():
+                self.assertFalse(self.entered.is_set())
+        self.assertEqual([], list(self.output.iterdir()))
+        self.assertIn('Skipping', '\n'.join(logs.output))
+
+    def test_registration_publishes_running_and_completed_capture(self):
+        with patch.dict(os.environ, {
+            'PYFLINK_WORKER_PROFILE_DIR': str(self.output.parent / 'registry'),
+            'WORKER_ID': 'beam-test',
+        }):
+            with register_worker() as registration:
+                status = registration.parent / 'profiles' / registration.name
+                with profiling.profile_worker_memory(registration):
+                    running = json.loads(status.read_text())
+                    self.assertEqual('RUNNING', running['profile']['status'])
+                    self.assertFalse(running['stop_confirmed'])
+                completed = json.loads(status.read_text())
+                self.assertEqual('FINISHED', completed['profile']['status'])
+                self.assertTrue(completed['stop_confirmed'])
+                self.assertTrue((self.output / completed['profile']['outputFile']).is_file())
+            self.assertTrue(status.is_file())
 
     def test_cprofile_conflict_skips_startup_capture(self):
         with patch.dict(os.environ, {'PYFLINK_MEMRAY_CPROFILE': 'true'}):
@@ -155,6 +201,7 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
 
         def wait(timeout):
             if timeout == 120:
+                self.assertFalse((self.output.parent / 'capture_lock').exists())
                 if not delay_elapsed.wait(5):
                     raise TimeoutError('Test did not release the delayed capture')
                 return stopped.is_set()
@@ -244,6 +291,7 @@ class WorkerMemoryProfilingTests(unittest.TestCase):
         self.assertEqual([], list(self.output.glob('*.bin')))
         self.assertEqual(1, len(list(self.output.glob('*.inprogress'))))
         self.assertNotIn('capture completed', '\n'.join(logs.output))
+        self.assertFalse(profiling._unconfirmed_capture_lock.closed)
         self.assertIn('capture failed', '\n'.join(logs.output))
 
     def test_thread_start_failure_preserves_worker_startup(self):

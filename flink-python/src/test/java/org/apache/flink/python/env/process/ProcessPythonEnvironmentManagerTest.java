@@ -243,6 +243,7 @@ class ProcessPythonEnvironmentManagerTest {
         systemEnv.put("INHERITED_SECRET", "must-not-be-passed-on");
         systemEnv.put("PYFLINK_WORKER_PROFILE_DIR", tmpDir);
         systemEnv.put("PYFLINK_WORKER_PROFILE_JOB_ID", "job-id");
+        systemEnv.put("PYFLINK_PROFILING_LOCK_FILE", tmpDir + "/profiling-lock");
 
         try (ProcessPythonEnvironmentManager environmentManager =
                 new ProcessPythonEnvironmentManager(
@@ -265,6 +266,7 @@ class ProcessPythonEnvironmentManagerTest {
                     .containsEntry("python", "python")
                     .containsEntry("PYFLINK_WORKER_PROFILE_DIR", tmpDir)
                     .containsEntry("PYFLINK_WORKER_PROFILE_JOB_ID", "job-id")
+                    .containsEntry("PYFLINK_PROFILING_LOCK_FILE", tmpDir + "/profiling-lock")
                     .containsEntry("BOOT_LOG_DIR", baseDir)
                     .containsEntry(PYFLINK_GATEWAY_DISABLED, "true");
             // the derivation itself still sees the whole environment

@@ -18,9 +18,11 @@
 
 package org.apache.flink.runtime.util.profiler;
 
+import org.apache.flink.runtime.memory.SharedResources;
+import org.apache.flink.runtime.rest.messages.ProfilingInfo;
 import org.apache.flink.runtime.rest.messages.PythonWorkerInfo;
 import org.apache.flink.runtime.rest.messages.PythonWorkerInfo.Operator;
-import org.apache.flink.util.IOUtils;
+import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.OperatingSystem;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -38,7 +40,6 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -50,71 +51,71 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-/** Reads standalone-worker registrations from this TaskManager's private working directory. */
-public class PythonWorkerRegistry {
+/** Tracks this TaskManager's Python workers and their operator associations. */
+public class PythonWorkerRegistry implements AutoCloseable {
+    public static final String SHARED_RESOURCE = PythonWorkerRegistry.class.getName();
     public static final String ENVIRONMENT_VARIABLE = "PYFLINK_WORKER_PROFILE_DIR";
     public static final String JOB_ID_ENVIRONMENT_VARIABLE = "PYFLINK_WORKER_PROFILE_JOB_ID";
     private static final Logger LOG = LoggerFactory.getLogger(PythonWorkerRegistry.class);
     private final Path directory;
     private final ObjectMapper mapper = new ObjectMapper();
+    private final Map<String, Map<String, Operator>> operators = new HashMap<>();
 
     public PythonWorkerRegistry(File workingDirectory) {
         directory = getRegistrationDirectory(workingDirectory);
+    }
+
+    public static PythonWorkerRegistry getOrCreate(
+            SharedResources sharedResources, File workingDirectory) {
+        try {
+            // The TaskManager owns one lease; operator lookups reuse that same lease.
+            return sharedResources
+                    .getOrAllocateSharedResource(
+                            SHARED_RESOURCE,
+                            sharedResources,
+                            ignored -> new PythonWorkerRegistry(workingDirectory),
+                            0)
+                    .resourceHandle();
+        } catch (Exception e) {
+            throw new FlinkRuntimeException("Could not initialize the Python worker registry", e);
+        }
     }
 
     public static Path getRegistrationDirectory(File workingDirectory) {
         return workingDirectory.toPath().resolve("python-workers");
     }
 
-    public Path registerOperator(String workerId, String executionId, Operator operator)
-            throws IOException {
-        final Path operators = directory.resolve("operators");
-        Files.createDirectories(operators);
-        final Path registration =
-                operators.resolve(executionId + "_" + operator.getOperatorId() + ".json");
-        final Path temporary = registration.resolveSibling(registration.getFileName() + ".tmp");
-        final ObjectNode record = mapper.createObjectNode();
-        record.put("worker_id", workerId);
-        record.set("operator", mapper.valueToTree(operator));
-        try {
-            mapper.writeValue(temporary.toFile(), record);
-            Files.move(temporary, registration, StandardCopyOption.ATOMIC_MOVE);
-            return registration;
-        } finally {
-            IOUtils.deleteFileQuietly(temporary);
-        }
+    public synchronized Runnable registerOperator(
+            String workerId, String executionId, Operator operator) {
+        final String workerKey = operator.getJobId() + ":" + workerId;
+        final String operatorKey = executionId + "_" + operator.getOperatorId();
+        operators.computeIfAbsent(workerKey, ignored -> new HashMap<>()).put(operatorKey, operator);
+        return () -> unregisterOperator(workerKey, operatorKey);
     }
 
-    private Map<String, List<Operator>> readOperators() throws IOException {
-        final Map<String, List<Operator>> result = new HashMap<>();
-        final Path operators = directory.resolve("operators");
-        if (Files.notExists(operators)) {
-            return result;
-        }
-        try (DirectoryStream<Path> entries = Files.newDirectoryStream(operators, "*.json")) {
-            for (Path entry : entries) {
-                if (!Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
-                    continue;
-                }
-                try {
-                    final JsonNode record = mapper.readTree(Files.readString(entry));
-                    if (!record.path("operator").isObject()) {
-                        continue;
-                    }
-                    final Operator operator =
-                            mapper.treeToValue(record.get("operator"), Operator.class);
-                    result.computeIfAbsent(
-                                    operator.getJobId() + ":" + record.path("worker_id").asText(),
-                                    ignored -> new ArrayList<>())
-                            .add(operator);
-                } catch (NoSuchFileException e) {
-                    LOG.debug("Python operator registration was removed: {}", entry);
-                } catch (IOException e) {
-                    LOG.warn("Could not read Python operator registration {}", entry, e);
-                }
-            }
-        }
-        return result;
+    private synchronized void unregisterOperator(String workerKey, String operatorKey) {
+        operators.computeIfPresent(
+                workerKey,
+                (ignored, registrations) -> {
+                    registrations.remove(operatorKey);
+                    return registrations.isEmpty() ? null : registrations;
+                });
+    }
+
+    private synchronized List<Operator> getOperators(JsonNode registration) {
+        final Map<String, Operator> registrations =
+                operators.get(
+                        registration.path("job_id").asText()
+                                + ":"
+                                + registration.path("worker_id").asText());
+        return registrations == null
+                ? Collections.emptyList()
+                : new ArrayList<>(registrations.values());
+    }
+
+    @Override
+    public synchronized void close() {
+        operators.clear();
     }
 
     public Collection<Worker> listWorkers() throws IOException {
@@ -122,7 +123,6 @@ public class PythonWorkerRegistry {
             return Collections.emptyList();
         }
         final Collection<Worker> workers = new ArrayList<>();
-        final Map<String, List<Operator>> operators = readOperators();
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(directory, "*.json")) {
             for (Path entry : entries) {
                 if (!Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
@@ -142,11 +142,7 @@ public class PythonWorkerRegistry {
                                     registration.path("start_token").asText(),
                                     registration.path("memory_available").asBoolean(false),
                                     registration.path("memory_busy").asBoolean(false),
-                                    operators.getOrDefault(
-                                            registration.path("job_id").asText()
-                                                    + ":"
-                                                    + registration.path("worker_id").asText(),
-                                            Collections.emptyList()));
+                                    getOperators(registration));
                     if (worker.getPid() <= 0 || worker.getStartToken().isEmpty()) {
                         continue;
                     }
@@ -171,6 +167,64 @@ public class PythonWorkerRegistry {
             }
         }
         return workers;
+    }
+
+    public Map<Path, ProfilingInfo> readStartupProfiling() throws IOException {
+        final Path profiles = directory.resolve("profiles");
+        final Map<Path, ProfilingInfo> result = new HashMap<>();
+        if (Files.notExists(profiles)) {
+            return result;
+        }
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(profiles, "*.json")) {
+            for (Path entry : entries) {
+                if (!Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+                    continue;
+                }
+                try {
+                    final JsonNode record = mapper.readTree(Files.readString(entry));
+                    final String id = record.path("registration_id").asText();
+                    if (!id.matches("[0-9a-f]{32}")
+                            || !entry.getFileName().toString().equals(id + ".json")
+                            || !record.path("profile").isObject()) {
+                        continue;
+                    }
+                    final Worker worker =
+                            new Worker(
+                                    id,
+                                    record.path("pid").asLong(),
+                                    record.path("start_token").asText(),
+                                    record.path("memory_available").asBoolean(),
+                                    record.path("memory_busy").asBoolean(),
+                                    getOperators(record));
+                    final ObjectNode profile = (ObjectNode) record.get("profile");
+                    profile.set("worker", mapper.valueToTree(worker.toInfo()));
+                    final ProfilingInfo info = mapper.treeToValue(profile, ProfilingInfo.class);
+                    if (info.getStatus() == null
+                            || info.getType() != ProfilingInfo.PythonProfilingType.MEMORY) {
+                        continue;
+                    }
+                    if (info.getStatus().isRunning() && !isAlive(worker)) {
+                        info.fail(
+                                "Python worker exited before completing startup memory profiling");
+                    } else if (info.getStatus() == ProfilingInfo.ProfilingStatus.FINISHED
+                            && (!record.path("stop_confirmed").asBoolean()
+                                    || info.getOutputFile() == null
+                                    || !info.getOutputFile()
+                                            .matches(
+                                                    "python-memory-startup-"
+                                                            + worker.getPid()
+                                                            + "-[0-9a-f]{32}\\.bin"))) {
+                        info.fail("Startup memory profiling has no confirmed completed recording");
+                    }
+                    result.put(entry, info);
+                } catch (NoSuchFileException e) {
+                    LOG.debug("Startup memory profiling status was consumed: {}", entry);
+                } catch (IOException e) {
+                    LOG.warn("Could not read startup memory profiling status {}", entry, e);
+                }
+            }
+        }
+        return result;
     }
 
     public Worker getWorker(String id) throws IOException {

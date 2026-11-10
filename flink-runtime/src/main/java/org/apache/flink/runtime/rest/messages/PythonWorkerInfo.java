@@ -35,8 +35,8 @@ public class PythonWorkerInfo implements Serializable {
     @JsonProperty("pid")
     private final long pid;
 
-    @JsonProperty("memoryProfilingAvailable")
-    private final boolean memoryProfilingAvailable;
+    @JsonProperty("memoryAttachAvailable")
+    private final boolean memoryAttachAvailable;
 
     @JsonProperty("operators")
     private final List<Operator> operators;
@@ -45,19 +45,19 @@ public class PythonWorkerInfo implements Serializable {
         this(id, pid, false);
     }
 
-    public PythonWorkerInfo(String id, long pid, boolean memoryProfilingAvailable) {
-        this(id, pid, memoryProfilingAvailable, Collections.emptyList());
+    public PythonWorkerInfo(String id, long pid, boolean memoryAttachAvailable) {
+        this(id, pid, memoryAttachAvailable, Collections.emptyList());
     }
 
     @JsonCreator
     public PythonWorkerInfo(
             @JsonProperty("id") String id,
             @JsonProperty("pid") long pid,
-            @JsonProperty("memoryProfilingAvailable") boolean memoryProfilingAvailable,
+            @JsonProperty("memoryAttachAvailable") boolean memoryAttachAvailable,
             @JsonProperty("operators") List<Operator> operators) {
         this.id = id;
         this.pid = pid;
-        this.memoryProfilingAvailable = memoryProfilingAvailable;
+        this.memoryAttachAvailable = memoryAttachAvailable;
         this.operators = List.copyOf(operators);
     }
 
@@ -65,8 +65,8 @@ public class PythonWorkerInfo implements Serializable {
         return operators;
     }
 
-    public boolean isMemoryProfilingAvailable() {
-        return memoryProfilingAvailable;
+    public boolean isMemoryAttachAvailable() {
+        return memoryAttachAvailable;
     }
 
     public String getId() {

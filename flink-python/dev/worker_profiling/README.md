@@ -20,8 +20,12 @@ under the License.
 # Python worker profiling: local integration
 
 The revised design ([English](FLIP-draft.en.md), [中文](FLIP-draft.md)) reuses Flink's existing profiling service,
-REST/RM/TM route, history, concurrency limit and BLOB download. The current prototype implements worker discovery, py-spy execution, startup Memray capture, and opt-in Memray attach/detach. This is a local
-branch, not an approved/released FLIP.
+REST/RM/TM route, history and BLOB download. The current prototype implements worker discovery, py-spy execution, startup Memray capture, and opt-in Memray attach/detach. This is a local
+branch, not an approved/released FLIP. The Chinese draft is synchronized from the user's reviewed
+manuscript; the English draft carries the same revised admission and retention contracts. The current
+implementation still shares one JVM/Python admission slot. Separate slots/execution, queryable
+skipped startup attempts, TM-wide Python result limits and dead-writer temporary-file cleanup are
+proposed follow-ups, not implemented behavior.
 
 The design was compared with the local VVR flamegraph implementation on 2026-10-24.
 Optional native-stack capture and a Python target selector in the existing Profiler UI
@@ -47,14 +51,22 @@ The revised configuration, memory REST contract and UI are implemented locally. 
 | Lifecycle | Stale registration reclamation, startup/attach conflict, bounded CLI/debugger cleanup, stop-unconfirmed reservation, and incomplete-file download rejection. |
 
 The first-release proposal exports a Memray binary for offline flamegraph/stats/tree
-analysis. Startup files share the TM directory/download route but do not enter REST
-history or its retention; this is the proposed first-release policy in the FLIP body.
+analysis. Startup captures appear in the existing Python profiling status query and download
+route. API and attach share the latest successful memory result for each worker; a failed
+attempt preserves the previous successful recording.
 
 See the [tool selection study](Profiler-selection-research.md),
 [framework comparison](Distributed-framework-profiling-research.md), and
 [Ray source review](Ray-profiling-research.md) for the underlying research.
 
 ## Build and test
+
+Commit validation (2026-11-10): 49 runtime tests, 22 Python Java tests, 19 worker memory
+lifecycle tests and 37 frontend tests pass. REST stability and generated-document consistency
+checks pass; the latter is run separately so the optional web-submission extension loads from
+its installed JAR. Spotless, Checkstyle, Flake8 (using `flink-python/tox.ini`), ESLint and
+`git diff --check` pass. These are targeted checks, not full-repository `clean verify` or
+acceptance of the proposed follow-ups listed above.
 
 From the repository root with the configured JDK and Maven wrapper:
 
@@ -125,25 +137,41 @@ GET  /taskmanagers/:tm/profiler/:filename
 ```
 
 `id` is an opaque process-instance handle; `pid` is display metadata.
-`memoryProfilingAvailable` indicates whether the worker was prepared for attach.
+`memoryAttachAvailable` indicates whether the worker was prepared for attach.
 Memory requests use `type: MEMORY`, omit `includeIdle`, and download a Memray binary.
 See [memory deployment and API instructions](Memory-experiment.md). Beam IDs and
 start tokens remain internal.
 JVM requests keep `{mode, duration}`. Python requests and responses omit JVM modes.
 Default history queries return JVM sessions; `target=python` selects Python sessions. Both use the
-existing RUNNING/FINISHED/FAILED states, history settings and active-session limit.
+existing RUNNING/FINISHED/FAILED states and JVM-wide active-session limit. Python results retain
+the latest successful CPU and memory file per worker, independently of JVM history settings.
 Capture rate is fixed at 50 Hz. The TaskManager Profiler tab now selects JVM or Python,
 lists workers, and offers native/idle checkboxes. A sole worker is selected on entering Python
 mode; multiple workers require a choice. An exited selection is cleared, never silently
 replaced with another process. History shows the target PID and requested sampling mode.
 Worker entries include an `operators` list with job ID, operator ID/name, subtask index and attempt
 number. The selector shows operator names and attempts alongside the PID. Java operator open/close
-updates association records; discovery joins them to Python's existing Beam worker ID, scoped by
-JobID. Shared workers list all associated operators; reports still describe the whole process.
+updates a TM-owned in-memory map shared through `SharedResources`; no operator association files
+are written. Discovery joins that map to Python process registrations by JobID + Beam worker ID.
+Shared workers list all associated operators; reports still describe the whole process.
 
 ## Evidence and limitations
 
-Latest follow-up validation (2026-11-08):
+Latest follow-up (2026-11-09):
+
+- Java operator associations use one registry per TM through existing `SharedResources`, independent
+  of Python managed memory. Operator-close callbacks remove their own execution-attempt entries;
+  TM shutdown releases the registry. Lifecycle and isolation tests replace file-publication tests.
+- API startup capture shares a POSIX admission lock with existing JVM/CPU/attach sessions. Status is
+  imported through the worker registry and exposed by existing REST/BLOB routes. Delay does not
+  reserve admission; busy windows are skipped. Unconfirmed Tracker shutdown holds admission until exit.
+- Successful CPU and memory results are retained independently per worker; API and attach share the
+  memory result. Failed attempts preserve successful files, and Python attempts do not evict JVM history.
+- Worker discovery, UI and generated schemas use `memoryAttachAvailable` without a compatibility alias.
+- Local Java/Python process evidence is in `output/worker-profiling-alignment-20261109`; it includes a
+  real Memray recording. Existing standalone and PyTorch overhead experiments were not rerun.
+
+Earlier follow-up validation (2026-11-08):
 
 - Worker association publication failures clean up their temporary files using the existing Flink
   helper while preserving the original error. A rename-failure regression failed before the fix;

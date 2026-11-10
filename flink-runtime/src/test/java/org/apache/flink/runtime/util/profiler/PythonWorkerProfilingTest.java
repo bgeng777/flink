@@ -20,6 +20,7 @@ package org.apache.flink.runtime.util.profiler;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
+import org.apache.flink.runtime.memory.SharedResources;
 import org.apache.flink.runtime.rest.messages.ProfilingInfo;
 import org.apache.flink.runtime.rest.messages.PythonWorkerInfo.Operator;
 import org.apache.flink.runtime.util.profiler.PythonWorkerRegistry.Worker;
@@ -37,9 +38,11 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.nio.file.FileSystemException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -146,45 +149,110 @@ class PythonWorkerProfilingTest {
     }
 
     @Test
+    void keepsOperatorAssociationsInMemory() throws Exception {
+        registry.registerOperator(
+                "beam-worker", "execution-a", new Operator("job-a", "a", "decode", 0, 0));
+        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators())
+                .extracting(Operator::getOperatorName)
+                .containsExactly("decode");
+        assertThat(
+                        PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile())
+                                .resolve("operators"))
+                .doesNotExist();
+    }
+
+    @Test
     void removesOnlyTheClosingOperatorFromASharedWorker() throws Exception {
-        final Path first =
+        final Runnable first =
                 registry.registerOperator(
                         "beam-worker", "execution-a", new Operator("job-a", "a", "decode", 0, 0));
-        final Path second =
+        final Runnable second =
                 registry.registerOperator(
                         "beam-worker", "execution-b", new Operator("job-a", "b", "infer", 0, 1));
         assertThat(registry.getWorker(worker.getId()).toInfo().getOperators())
                 .extracting(Operator::getOperatorName)
                 .containsExactlyInAnyOrder("decode", "infer");
-        Files.delete(first);
+        first.run();
+        first.run();
         assertThat(registry.getWorker(worker.getId()).toInfo().getOperators())
                 .extracting(Operator::getOperatorName)
                 .containsExactly("infer");
-        Files.delete(second);
+        second.run();
         assertThat(registry.getWorker(worker.getId()).toInfo().getOperators()).isEmpty();
         assertThat(workerProcess.isAlive()).isTrue();
     }
 
     @Test
-    void removesTemporaryOperatorRegistrationWhenMoveFails() throws Exception {
-        final Path operators =
-                PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile())
-                        .resolve("operators");
-        final Path registration = operators.resolve("execution-a_a.json");
-        Files.createDirectories(registration);
-        final Path unrelated = registration.resolve("keep.txt");
-        Files.writeString(unrelated, "keep");
+    void closingAnOldAttemptPreservesTheNewAttempt() throws Exception {
+        final Runnable oldAttempt =
+                registry.registerOperator(
+                        "beam-worker", "execution-a", new Operator("job-a", "a", "infer", 0, 0));
+        final Runnable newAttempt =
+                registry.registerOperator(
+                        "beam-worker", "execution-b", new Operator("job-a", "a", "infer", 0, 1));
+        oldAttempt.run();
+        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators())
+                .extracting(Operator::getAttemptNumber)
+                .containsExactly(1);
+        newAttempt.run();
+        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators()).isEmpty();
+    }
 
-        assertThatThrownBy(
-                        () ->
-                                registry.registerOperator(
-                                        "beam-worker",
-                                        "execution-a",
-                                        new Operator("job-a", "a", "decode", 0, 0)))
-                .isInstanceOf(FileSystemException.class)
-                .hasMessageContaining(registration.toString());
-        assertThat(operators.resolve("execution-a_a.json.tmp")).doesNotExist();
-        assertThat(unrelated).hasContent("keep");
+    @Test
+    void sharesRegistryWithinOneTaskManagerAndReleasesItOnShutdown() throws Exception {
+        final SharedResources resources = new SharedResources();
+        final PythonWorkerRegistry first =
+                PythonWorkerRegistry.getOrCreate(resources, temporary.toFile());
+        try {
+            first.registerOperator(
+                    "beam-worker", "execution-a", new Operator("job-a", "a", "infer", 0, 0));
+            final PythonWorkerRegistry second =
+                    PythonWorkerRegistry.getOrCreate(resources, temporary.toFile());
+            assertThat(second).isSameAs(first);
+            assertThat(second.getWorker(worker.getId()).toInfo().getOperators())
+                    .extracting(Operator::getOperatorName)
+                    .containsExactly("infer");
+        } finally {
+            resources.release(PythonWorkerRegistry.SHARED_RESOURCE, resources, ignored -> {});
+        }
+        assertThat(first.getWorker(worker.getId()).toInfo().getOperators()).isEmpty();
+    }
+
+    @Test
+    void keepsOperatorAssociationsSeparateAcrossTaskManagers() throws Exception {
+        final SharedResources firstResources = new SharedResources();
+        final SharedResources secondResources = new SharedResources();
+        final Path otherDirectory = temporary.resolve("other-tm");
+        final PythonWorkerRegistry first =
+                PythonWorkerRegistry.getOrCreate(firstResources, temporary.toFile());
+        final PythonWorkerRegistry second =
+                PythonWorkerRegistry.getOrCreate(secondResources, otherDirectory.toFile());
+        try {
+            final Path workerFile = Path.of(worker.getId() + ".json");
+            final Path otherRegistrations =
+                    PythonWorkerRegistry.getRegistrationDirectory(otherDirectory.toFile());
+            Files.createDirectories(otherRegistrations);
+            Files.copy(
+                    PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile())
+                            .resolve(workerFile),
+                    otherRegistrations.resolve(workerFile));
+            first.registerOperator(
+                    "beam-worker", "execution-a", new Operator("job-a", "a", "decode", 0, 0));
+            second.registerOperator(
+                    "beam-worker", "execution-b", new Operator("job-a", "b", "infer", 0, 0));
+            assertThat(second).isNotSameAs(first);
+            assertThat(first.getWorker(worker.getId()).toInfo().getOperators())
+                    .extracting(Operator::getOperatorName)
+                    .containsExactly("decode");
+            assertThat(second.getWorker(worker.getId()).toInfo().getOperators())
+                    .extracting(Operator::getOperatorName)
+                    .containsExactly("infer");
+        } finally {
+            firstResources.release(
+                    PythonWorkerRegistry.SHARED_RESOURCE, firstResources, ignored -> {});
+            secondResources.release(
+                    PythonWorkerRegistry.SHARED_RESOURCE, secondResources, ignored -> {});
+        }
     }
 
     @Test
@@ -216,18 +284,7 @@ class PythonWorkerProfilingTest {
     }
 
     @Test
-    void ignoresUnrecognizedOperatorRecords() throws Exception {
-        final Path operators =
-                PythonWorkerRegistry.getRegistrationDirectory(temporary.toFile())
-                        .resolve("operators");
-        Files.createDirectories(operators);
-        Files.writeString(operators.resolve("unrelated.json"), "{}");
-        Files.writeString(operators.resolve("broken.json"), "{");
-        assertThat(registry.getWorker(worker.getId()).toInfo().getOperators()).isEmpty();
-    }
-
-    @Test
-    void usesExistingHistoryAndResultDirectory() throws Exception {
+    void retainsOnlyTheLatestSuccessfulResult() throws Exception {
         sampler("printf '<svg>TEST FIXTURE, NOT SAMPLED</svg>' > \"$output\"");
         Files.createDirectories(output);
         final Path unrelated = output.resolve("keep.txt");
@@ -242,11 +299,87 @@ class PythonWorkerProfilingTest {
         awaitCompletion();
         start();
         awaitCompletion();
-        assertThat(service.getProfilingList("tm").get()).hasSize(2);
+        assertThat(service.getProfilingList("tm").get()).hasSize(1);
         assertThat(output.resolve(first.getOutputFile())).doesNotExist();
         try (java.util.stream.Stream<Path> files = Files.list(output)) {
-            assertThat(files.collect(Collectors.toList())).hasSize(3).contains(unrelated);
+            assertThat(files.collect(Collectors.toList())).hasSize(2).contains(unrelated);
         }
+    }
+
+    @Test
+    void failedCapturePreservesThePreviousSuccessfulResult() throws Exception {
+        sampler("printf '<svg>TEST FIXTURE</svg>' > \"$output\"");
+        final ProfilingInfo successful = start();
+        awaitCompletion();
+        sampler("exit 1");
+        start();
+        awaitCompletion();
+        start();
+        awaitCompletion();
+        assertThat(output.resolve(successful.getOutputFile())).isRegularFile();
+        assertThat(service.getProfilingList("tm").get()).hasSize(2).contains(successful);
+    }
+
+    @Test
+    void retainsSuccessfulResultsForDifferentWorkers() throws Exception {
+        sampler("printf '<svg>TEST FIXTURE</svg>' > \"$output\"");
+        final ProfilingInfo first = start();
+        awaitCompletion();
+        final Process secondProcess = new ProcessBuilder("/bin/sh", "-c", "exec sleep 60").start();
+        try {
+            final Worker second = registerWorker(secondProcess);
+            ProfilingInfo latest = null;
+            for (int i = 0; i < 2; i++) {
+                latest =
+                        service.requestPythonProfiling(
+                                        "tm", 2, second, registry, sampler.toString(), false, false)
+                                .get();
+                awaitCompletion();
+            }
+            assertThat(service.getProfilingList("tm").get()).hasSize(2).contains(first, latest);
+            assertThat(output.resolve(first.getOutputFile())).isRegularFile();
+        } finally {
+            secondProcess.destroyForcibly();
+            assertThat(secondProcess.waitFor(5, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void startupCaptureSharesTheJvmAndCpuSlot() throws Exception {
+        try (FileChannel channel =
+                        FileChannel.open(
+                                service.getProfilingLockFile(),
+                                StandardOpenOption.CREATE,
+                                StandardOpenOption.WRITE);
+                FileLock lock = channel.lock()) {
+            assertThat(lock.isValid()).isTrue();
+            assertThatThrownBy(() -> start()).hasCauseInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(
+                            () ->
+                                    service.requestProfiling(
+                                                    "tm", 1, ProfilingInfo.ProfilingMode.ITIMER)
+                                            .get())
+                    .hasCauseInstanceOf(IllegalStateException.class);
+        }
+        sampler("printf '<svg>TEST FIXTURE</svg>' > \"$output\"");
+        assertThat(start().getStatus()).isEqualTo(ProfilingInfo.ProfilingStatus.RUNNING);
+        awaitCompletion();
+    }
+
+    @Test
+    void pythonResultsDoNotEvictJvmHistory() throws Exception {
+        Files.createDirectories(output);
+        final ProfilingInfo jvm =
+                ProfilingInfo.create(1, ProfilingInfo.ProfilingMode.ITIMER).success("jvm.html");
+        Files.writeString(output.resolve(jvm.getOutputFile()), "JVM result fixture");
+        service.getProfilingListForTest("tm").add(jvm);
+        sampler("printf '<svg>TEST FIXTURE</svg>' > \"$output\"");
+        for (int i = 0; i < 3; i++) {
+            start();
+            awaitCompletion();
+        }
+        assertThat(service.getProfilingList("tm").get()).hasSize(2).contains(jvm);
+        assertThat(output.resolve(jvm.getOutputFile())).isRegularFile();
     }
 
     @Test

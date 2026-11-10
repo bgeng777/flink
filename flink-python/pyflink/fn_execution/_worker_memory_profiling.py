@@ -16,8 +16,9 @@
 # specific language governing permissions and limitations
 # under the License.
 ################################################################################
-"""Experimental startup memory capture; not a supported configuration/API."""
+"""One bounded, opt-in Memray capture in the Python worker process."""
 
+import json
 import logging
 import math
 import os
@@ -27,7 +28,29 @@ from threading import Event, Thread
 import time
 import uuid
 
-from pyflink.fn_execution._worker_profiling import finish_startup_memory_capture
+from pyflink.fn_execution._worker_profiling import set_memory_profiling_busy
+
+# A failed Tracker close must retain admission until the worker process exits.
+_unconfirmed_capture_lock = None
+
+
+def _publish_capture(registration, profile, stop_confirmed):
+    if registration is None:
+        return
+    record = json.loads(registration.read_text())
+    record['profile'] = profile
+    record['stop_confirmed'] = stop_confirmed
+    directory = registration.parent / 'profiles'
+    directory.mkdir(mode=0o700, exist_ok=True)
+    target = directory / registration.name
+    temporary = target.with_suffix('.tmp')
+    try:
+        with temporary.open('w') as output:
+            os.chmod(temporary, 0o600)
+            json.dump(record, output)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -52,15 +75,16 @@ def profile_worker_memory(registration=None):
         native = os.environ.get('PYFLINK_MEMRAY_NATIVE_TRACES', 'false').lower()
         if native not in ('true', 'false'):
             raise ValueError('PYFLINK_MEMRAY_NATIVE_TRACES must be true or false')
+        lock_file = os.environ['PYFLINK_PROFILING_LOCK_FILE']
 
+        import fcntl
         from memray import FileDestination, Tracker
 
         root = Path(directory).resolve()
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         capture = root / ('python-memory-startup-%s-%s.bin' % (os.getpid(), uuid.uuid4().hex))
-    except (ImportError, OSError, ValueError):
+    except (ImportError, KeyError, OSError, ValueError):
         logging.warning('Could not prepare Python worker Memray capture', exc_info=True)
-        finish_startup_memory_capture(registration)
         yield
         return
 
@@ -68,29 +92,67 @@ def profile_worker_memory(registration=None):
     ready = Event()
 
     def record():
+        global _unconfirmed_capture_lock
+        slot = None
+        stop_confirmed = True
+        profile = None
+        pending = capture.with_suffix('.bin.inprogress')
         try:
             if stop.wait(delay):
-                finish_startup_memory_capture(registration)
                 logging.info('Python worker Memray capture cancelled before starting: %s', capture)
                 return
-            pending = capture.with_suffix('.bin.inprogress')
-            # Keep compression and report generation off the worker's shutdown path.
-            with Tracker(destination=FileDestination(pending, compress_on_exit=False),
-                         native_traces=native == 'true'):
+            slot = open(lock_file, 'a+b')
+            try:
+                # lockf uses the same POSIX record locks as Java FileChannel.tryLock.
+                fcntl.lockf(slot, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                logging.info('Skipping Python worker Memray capture: the Flink JVM is profiling')
+                return
+            set_memory_profiling_busy(registration, True)
+            profile = {
+                'status': 'RUNNING', 'type': 'MEMORY',
+                'triggerTime': time.time_ns() // 1_000_000,
+                'duration': math.ceil(duration), 'includeNative': native == 'true',
+            }
+            _publish_capture(registration, profile, False)
+            tracker = Tracker(destination=FileDestination(pending, compress_on_exit=False),
+                              native_traces=native == 'true')
+            stop_confirmed = False
+            with tracker:
                 logging.info('Python worker Memray capture started: pid=%s, started_at=%s, file=%s',
                              os.getpid(), time.time(), pending)
                 ready.set()
                 stop.wait(duration)
-            # Only publish a completed artifact after Tracker has flushed and closed it.
-            finish_startup_memory_capture(registration)
+            stop_confirmed = True
             pending.replace(capture)
+            profile.update(status='FINISHED', finishedTime=time.time_ns() // 1_000_000,
+                           outputFile=capture.name)
             logging.info('Python worker Memray capture completed: pid=%s, ended_at=%s, file=%s',
                          os.getpid(), time.time(), capture)
-        except Exception:
-            # This boundary handles profiler failures, never exceptions from the harness.
+        except Exception as error:
+            # Profiler failures must not replace an exception raised by the harness.
             logging.warning('Python worker Memray capture failed: %s', capture, exc_info=True)
+            if profile is not None:
+                message = str(error)
+                if not stop_confirmed:
+                    message += ('; stop unconfirmed; profiling remains reserved '
+                                'until the worker exits')
+                profile.update(status='FAILED', finishedTime=time.time_ns() // 1_000_000,
+                               message=message)
         finally:
-            ready.set()
+            try:
+                if profile is not None:
+                    _publish_capture(registration, profile, stop_confirmed)
+            except OSError:
+                logging.warning('Could not publish Python worker Memray status', exc_info=True)
+            finally:
+                if stop_confirmed:
+                    set_memory_profiling_busy(registration, False)
+                    if slot is not None:
+                        slot.close()
+                else:
+                    _unconfirmed_capture_lock = slot
+                ready.set()
 
     logging.info('Python worker Memray capture enabled: pid=%s, delay=%ss, duration=%ss, '
                  'native_traces=%s, file=%s', os.getpid(), delay, duration, native, capture)
@@ -98,14 +160,12 @@ def profile_worker_memory(registration=None):
     try:
         recorder.start()
     except RuntimeError:
-        finish_startup_memory_capture(registration)
         logging.warning('Could not start Python worker Memray capture', exc_info=True)
         yield
         return
 
     try:
         if delay == 0:
-            # Start before the harness imports user code when no delay is requested.
             ready.wait()
         yield
     finally:

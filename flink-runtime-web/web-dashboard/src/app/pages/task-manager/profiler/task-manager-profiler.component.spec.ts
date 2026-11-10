@@ -38,8 +38,8 @@ describe('TaskManagerProfilerComponent', () => {
   const createProfilingInstance = vi.fn();
   const loadPythonWorkers = vi.fn();
   let refresh: Subject<boolean>;
-  const firstWorker: PythonWorkerInfo = { id: 'one', pid: 123, memoryProfilingAvailable: false, operators: [] };
-  const secondWorker: PythonWorkerInfo = { id: 'two', pid: 456, memoryProfilingAvailable: false, operators: [] };
+  const firstWorker: PythonWorkerInfo = { id: 'one', pid: 123, memoryAttachAvailable: false, operators: [] };
+  const secondWorker: PythonWorkerInfo = { id: 'two', pid: 456, memoryAttachAvailable: false, operators: [] };
   const warning = vi.fn();
   let component: TaskManagerProfilerComponent;
 
@@ -134,7 +134,7 @@ describe('TaskManagerProfilerComponent', () => {
   });
 
   it('requires explicit risk confirmation and omits idle for memory attach', () => {
-    loadPythonWorkers.mockReturnValue(of([{ ...firstWorker, memoryProfilingAvailable: true }]));
+    loadPythonWorkers.mockReturnValue(of([{ ...firstWorker, memoryAttachAvailable: true }]));
     component.ngOnInit();
     component.setTarget('PYTHON');
     component.pythonType = 'MEMORY';
@@ -266,7 +266,7 @@ describe('TaskManagerProfilerComponent', () => {
 describe('TaskManagerProfilerComponent rendering', () => {
   let fixture: ComponentFixture<TaskManagerProfilerComponent>;
   let element: HTMLElement;
-  const worker: PythonWorkerInfo = { id: 'registered', pid: 123, memoryProfilingAvailable: false, operators: [] };
+  const worker: PythonWorkerInfo = { id: 'registered', pid: 123, memoryAttachAvailable: false, operators: [] };
   const loadPythonWorkers = vi.fn();
   const createProfilingInstance = vi.fn();
   const profile: ProfilingDetail = {

@@ -39,16 +39,23 @@ import javax.annotation.Nullable;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -62,8 +69,22 @@ public class ProfilingService implements Closeable {
 
     protected static final Logger LOG = LoggerFactory.getLogger(ProfilingService.class);
     private static final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd_HH_mm_ss");
+    private static final Comparator<ProfilingInfo> PROFILE_ORDER =
+            Comparator.comparingLong(ProfilingInfo::getTriggerTime)
+                    .thenComparingLong(
+                            info ->
+                                    info.getStatus().isRunning()
+                                            ? Long.MAX_VALUE
+                                            : info.getFinishedTime());
     private static volatile ProfilingService instance;
     private final Map<String, ArrayDeque<ProfilingInfo>> profilingMap;
+    private final Map<String, ArrayDeque<ProfilingInfo>> pythonProfilingMap = new HashMap<>();
+    private final Map<Path, ProfilingInfo> startupProfiling = new HashMap<>();
+    private final Path profilingLockFile =
+            Paths.get(System.getProperty("java.io.tmpdir"), "flink-profiling-" + UUID.randomUUID());
+    @Nullable private FileChannel profilingLockChannel;
+    @Nullable private FileLock profilingLock;
+    private boolean closed;
     private final String profilingResultDir;
     private final int historySizeLimit;
     private final ScheduledExecutorService scheduledExecutor;
@@ -73,6 +94,7 @@ public class ProfilingService implements Closeable {
 
     private ProfilingService(Configuration configs) {
         this.profilingMap = new HashMap<>();
+        profilingLockFile.toFile().deleteOnExit();
         this.historySizeLimit = configs.get(RestOptions.MAX_PROFILING_HISTORY_SIZE);
         Preconditions.checkArgument(
                 historySizeLimit > 0,
@@ -100,26 +122,29 @@ public class ProfilingService implements Closeable {
 
     public synchronized CompletableFuture<ProfilingInfo> requestProfiling(
             String resourceID, long duration, ProfilingInfo.ProfilingMode mode) {
-        if (profilingFuture != null && !profilingFuture.isDone()) {
-            return FutureUtils.completedExceptionally(
-                    new IllegalStateException(resourceID + " is still under profiling."));
+        try {
+            acquireProfilingSlot();
+        } catch (IOException | IllegalStateException e) {
+            return FutureUtils.completedExceptionally(e);
         }
         ProfilingInfo profilingInfo = ProfilingInfo.create(duration, mode);
         profilingMap.putIfAbsent(resourceID, new ArrayDeque<>());
         profilingMap.get(resourceID).addFirst(profilingInfo);
         rollingClearing(profilingMap.get(resourceID));
-        AsyncProfiler profiler = AsyncProfiler.getInstance();
         try {
+            AsyncProfiler profiler = AsyncProfiler.getInstance();
             String response =
                     profiler.execute(
                             ProfilerConstants.COMMAND_START.msg
                                     + profilingInfo.getProfilingMode().getCode());
             if (StringUtils.isNullOrWhitespaceOnly(response)
                     || !response.startsWith(ProfilerConstants.PROFILER_STARTED_SUCCESS.msg)) {
+                releaseProfilingSlot();
                 return CompletableFuture.completedFuture(
                         profilingInfo.fail("Start profiler failed. " + response));
             }
         } catch (Exception e) {
+            releaseProfilingSlot();
             return CompletableFuture.completedFuture(
                     profilingInfo.fail("Start profiler failed. " + e));
         }
@@ -136,15 +161,14 @@ public class ProfilingService implements Closeable {
             String executable,
             boolean includeIdle,
             boolean includeNative) {
-        if (profilingFuture != null && !profilingFuture.isDone()) {
-            return FutureUtils.completedExceptionally(
-                    new IllegalStateException(resourceID + " is still under profiling."));
+        try {
+            acquireProfilingSlot();
+        } catch (IOException | IllegalStateException e) {
+            return FutureUtils.completedExceptionally(e);
         }
         final ProfilingInfo info =
                 ProfilingInfo.createPython(duration, worker.toInfo(), includeIdle, includeNative);
-        profilingMap.putIfAbsent(resourceID, new ArrayDeque<>());
-        profilingMap.get(resourceID).addFirst(info);
-        rollingClearing(profilingMap.get(resourceID));
+        retainPythonProfiling(resourceID, info);
         final PythonWorkerProfiler profiler =
                 new PythonWorkerProfiler(
                         registry,
@@ -155,6 +179,7 @@ public class ProfilingService implements Closeable {
                         includeIdle,
                         includeNative);
         final CompletableFuture<Void> completion = new CompletableFuture<>();
+        completion.whenComplete((ignored, failure) -> releaseProfilingSlot());
         pythonProfilingResourceID = resourceID;
         pythonProfilingCompletion = completion;
         profilingFuture = new ProfilingFuture(completion, profiler::cancel);
@@ -164,6 +189,7 @@ public class ProfilingService implements Closeable {
                         final String filename = profiler.profile();
                         synchronized (this) {
                             info.success(filename);
+                            retainPythonProfiling(resourceID, info);
                         }
                     } catch (Exception e) {
                         if (e instanceof InterruptedException) {
@@ -186,15 +212,15 @@ public class ProfilingService implements Closeable {
             PythonWorkerRegistry registry,
             String executable,
             boolean includeNative) {
-        if (profilingFuture != null && !profilingFuture.isDone()) {
-            return FutureUtils.completedExceptionally(
-                    new IllegalStateException("A profiling session is active in this Flink JVM"));
+        try {
+            acquireProfilingSlot();
+        } catch (IOException | IllegalStateException e) {
+            return FutureUtils.completedExceptionally(e);
         }
         final ProfilingInfo info =
                 ProfilingInfo.createPython(duration, worker.toInfo(), false, includeNative);
         info.setType(ProfilingInfo.PythonProfilingType.MEMORY);
-        profilingMap.computeIfAbsent(resourceID, ignored -> new ArrayDeque<>()).addFirst(info);
-        rollingClearing(profilingMap.get(resourceID));
+        retainPythonProfiling(resourceID, info);
         final Optional<ProcessHandle> workerHandle = ProcessHandle.of(worker.getPid());
         final PythonWorkerMemoryProfiler profiler =
                 new PythonWorkerMemoryProfiler(
@@ -205,6 +231,7 @@ public class ProfilingService implements Closeable {
                         duration,
                         includeNative);
         final CompletableFuture<Void> completion = new CompletableFuture<>();
+        completion.whenComplete((ignored, failure) -> releaseProfilingSlot());
         pythonProfilingResourceID = resourceID;
         pythonProfilingCompletion = completion;
         profilingFuture = new ProfilingFuture(completion, profiler::cancel);
@@ -214,6 +241,7 @@ public class ProfilingService implements Closeable {
                         final String file = profiler.profile();
                         synchronized (this) {
                             info.success(file);
+                            retainPythonProfiling(resourceID, info);
                         }
                     } catch (Exception error) {
                         if (error instanceof InterruptedException) {
@@ -273,6 +301,8 @@ public class ProfilingService implements Closeable {
             rollingClearing(profilingList);
         } catch (Throwable e) {
             info.fail("Stop profiler failed. " + e);
+        } finally {
+            releaseProfilingSlot();
         }
     }
 
@@ -298,6 +328,7 @@ public class ProfilingService implements Closeable {
 
     @Override
     public synchronized void close() throws IOException {
+        closed = true;
         try {
             if (profilingFuture != null && !profilingFuture.isDone()) {
                 profilingFuture.cancel();
@@ -308,14 +339,123 @@ public class ProfilingService implements Closeable {
         } catch (Exception e) {
             LOG.error("Exception thrown during stopping profiling service. ", e);
         } finally {
+            if (profilingLock == null && profilingLockChannel != null) {
+                profilingLockChannel.close();
+            }
             instance = null;
         }
     }
 
     public synchronized CompletableFuture<Collection<ProfilingInfo>> getProfilingList(
             String resourceID) {
-        return CompletableFuture.completedFuture(
-                new ArrayList<>(profilingMap.getOrDefault(resourceID, new ArrayDeque<>())));
+        final ArrayList<ProfilingInfo> profiles =
+                new ArrayList<>(profilingMap.getOrDefault(resourceID, new ArrayDeque<>()));
+        profiles.addAll(pythonProfilingMap.getOrDefault(resourceID, new ArrayDeque<>()));
+        profiles.sort(PROFILE_ORDER.reversed());
+        return CompletableFuture.completedFuture(profiles);
+    }
+
+    public Path getProfilingLockFile() {
+        return profilingLockFile;
+    }
+
+    private void acquireProfilingSlot() throws IOException {
+        Preconditions.checkState(!closed, "The profiling service is shutting down");
+        Preconditions.checkState(
+                (profilingFuture == null || profilingFuture.isDone())
+                        && (profilingLock == null || !profilingLock.isValid()),
+                "A profiling session is active in this Flink JVM");
+        if (profilingLockChannel == null) {
+            // Closing another descriptor for this file would release this JVM's POSIX lock.
+            profilingLockChannel =
+                    FileChannel.open(
+                            profilingLockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        }
+        profilingLock = profilingLockChannel.tryLock();
+        Preconditions.checkState(
+                profilingLock != null, "A profiling session is active in this Flink JVM");
+    }
+
+    private synchronized void releaseProfilingSlot() {
+        try {
+            if (profilingLock != null) {
+                profilingLock.release();
+                profilingLock = null;
+            }
+            if (closed && profilingLockChannel != null) {
+                profilingLockChannel.close();
+            }
+        } catch (IOException e) {
+            LOG.warn("Could not release the profiling slot", e);
+        }
+    }
+
+    private void retainPythonProfiling(String resourceID, ProfilingInfo info) {
+        final ArrayDeque<ProfilingInfo> profiles =
+                pythonProfilingMap.computeIfAbsent(resourceID, ignored -> new ArrayDeque<>());
+        profiles.remove(info);
+        profiles.addFirst(info);
+        final ProfilingInfo latest =
+                profiles.stream()
+                        .filter(previous -> samePythonTarget(previous, info))
+                        .max(PROFILE_ORDER)
+                        .orElseThrow();
+        final ProfilingInfo successful =
+                profiles.stream()
+                        .filter(
+                                previous ->
+                                        samePythonTarget(previous, info)
+                                                && previous.getStatus()
+                                                        == ProfilingInfo.ProfilingStatus.FINISHED)
+                        .max(PROFILE_ORDER)
+                        .orElse(null);
+        final Iterator<ProfilingInfo> iterator = profiles.iterator();
+        while (iterator.hasNext()) {
+            final ProfilingInfo previous = iterator.next();
+            if (samePythonTarget(previous, info) && previous != latest && previous != successful) {
+                if (previous.getOutputFile() != null
+                        && (successful == null
+                                || !previous.getOutputFile().equals(successful.getOutputFile()))) {
+                    try {
+                        Files.deleteIfExists(
+                                Paths.get(profilingResultDir, previous.getOutputFile()));
+                    } catch (IOException e) {
+                        LOG.warn(
+                                "Could not remove Python profiling result {}",
+                                previous.getOutputFile(),
+                                e);
+                    }
+                }
+                iterator.remove();
+            }
+        }
+    }
+
+    private static boolean samePythonTarget(ProfilingInfo first, ProfilingInfo second) {
+        return first.getWorker().getId().equals(second.getWorker().getId())
+                && first.getType() == second.getType();
+    }
+
+    public synchronized void refreshStartupProfiling(
+            String resourceID, PythonWorkerRegistry registry) throws IOException {
+        for (Map.Entry<Path, ProfilingInfo> entry : registry.readStartupProfiling().entrySet()) {
+            final ProfilingInfo info = entry.getValue();
+            if (info.getStatus() == ProfilingInfo.ProfilingStatus.FINISHED) {
+                final Path output = Paths.get(profilingResultDir, info.getOutputFile());
+                if (!Files.isRegularFile(output) || Files.size(output) == 0) {
+                    info.fail("Startup memory profiling produced no completed recording");
+                }
+            }
+            final ProfilingInfo previous = startupProfiling.put(entry.getKey(), info);
+            if (previous != null) {
+                pythonProfilingMap.get(resourceID).remove(previous);
+            }
+            retainPythonProfiling(resourceID, info);
+            if (!info.getStatus().isRunning()) {
+                startupProfiling.remove(entry.getKey());
+                Files.deleteIfExists(entry.getKey());
+            }
+        }
     }
 
     public String getProfilingResultDir() {
@@ -324,7 +464,7 @@ public class ProfilingService implements Closeable {
 
     @VisibleForTesting
     ArrayDeque<ProfilingInfo> getProfilingListForTest(String resourceID) {
-        return profilingMap.getOrDefault(resourceID, new ArrayDeque<>());
+        return profilingMap.computeIfAbsent(resourceID, ignored -> new ArrayDeque<>());
     }
 
     @VisibleForTesting

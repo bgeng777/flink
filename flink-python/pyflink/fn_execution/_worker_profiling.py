@@ -83,7 +83,7 @@ def register_worker():
             'start_token': process_identity(os.getpid()),
             'memory_available': (memory_available and
                                  os.environ.get('PYFLINK_MEMRAY_ATTACH') == 'true'),
-            'memory_busy': bool(os.environ.get('PYFLINK_MEMRAY_OUTPUT_DIR')),
+            'memory_busy': False,
         }
         path = root / (registration['registration_id'] + '.json')
         temporary = path.with_suffix('.tmp')
@@ -106,12 +106,12 @@ def register_worker():
                 logging.warning('Could not remove Python profiling registration', exc_info=True)
 
 
-def finish_startup_memory_capture(path):
+def set_memory_profiling_busy(path, busy):
     if path is None:
         return
     try:
         registration = json.loads(path.read_text())
-        registration['memory_busy'] = False
+        registration['memory_busy'] = busy
         temporary = path.with_suffix('.tmp')
         with temporary.open('w') as output:
             os.chmod(temporary, 0o600)

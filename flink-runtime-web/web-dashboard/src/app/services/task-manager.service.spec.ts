@@ -225,7 +225,7 @@ describe('TaskManagerService', () => {
   });
 
   it('loads registered Python workers from the routed TaskManager', async () => {
-    const workers = [{ id: 'registered', pid: 123, memoryProfilingAvailable: false, operators: [] }];
+    const workers = [{ id: 'registered', pid: 123, memoryAttachAvailable: false, operators: [] }];
     httpClient.get.mockReturnValue(of({ workers }));
     expect(await firstValueFrom(service.loadPythonWorkers('tm-1'))).toEqual(workers);
     expect(httpClient.get).toHaveBeenCalledWith(`${configService.BASE_URL}/taskmanagers/tm-1/python-workers`);

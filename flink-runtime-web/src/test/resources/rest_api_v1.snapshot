@@ -1158,7 +1158,7 @@
             "pid" : {
               "type" : "integer"
             },
-            "memoryProfilingAvailable" : {
+            "memoryAttachAvailable" : {
               "type" : "boolean"
             },
             "operators" : {
@@ -1261,7 +1261,7 @@
                   "pid" : {
                     "type" : "integer"
                   },
-                  "memoryProfilingAvailable" : {
+                  "memoryAttachAvailable" : {
                     "type" : "boolean"
                   },
                   "operators" : {
@@ -5684,7 +5684,7 @@
             "pid" : {
               "type" : "integer"
             },
-            "memoryProfilingAvailable" : {
+            "memoryAttachAvailable" : {
               "type" : "boolean"
             },
             "operators" : {
@@ -5792,7 +5792,7 @@
                   "pid" : {
                     "type" : "integer"
                   },
-                  "memoryProfilingAvailable" : {
+                  "memoryAttachAvailable" : {
                     "type" : "boolean"
                   },
                   "operators" : {
@@ -5865,7 +5865,7 @@
               "pid" : {
                 "type" : "integer"
               },
-              "memoryProfilingAvailable" : {
+              "memoryAttachAvailable" : {
                 "type" : "boolean"
               },
               "operators" : {

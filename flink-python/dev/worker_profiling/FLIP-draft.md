@@ -1,125 +1,211 @@
-<!--
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements. See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership. The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License. You may obtain a copy of the License at
-
-  http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied. See the License for the
-specific language governing permissions and limitations
-under the License.
--->
-
-# FLIP-XXX：Python Worker CPU 与内存性能分析
-
-**中文** | [English](FLIP-draft.en.md)
-
-| 项目 | 内容 |
-| --- | --- |
-| 状态 | 本地讨论草稿；范围和接口尚未经社区讨论或投票 |
-| 讨论邮件 | 待发起 |
-| 投票邮件 | 待发起 |
-| JIRA | 待创建或关联 |
-| 目标版本 | 待定 |
-| 更新日期 | 2026-11-08 |
-
-本提案为 Flink 管理的 standalone Python worker 增加 CPU 与内存性能分析。
-CPU 使用进程外 py-spy 采样；内存同时支持启动时直接集成 Tracker，以及带明确风险提示和页面确认的按需 Memray attach。
-两种内存方式均纳入正式提案，工具由部署环境作为可选依赖提供。
-
-根据触发方式尽量复用 Flink 已有 profiling 路由、会话、结果目录和文件/BLOB 下载，
-不新增 worker 控制协议或通用 profiling 框架。正文描述拟议的公共约定和设计；
-Test Plan 列出合并及发布前的验收要求，附录 A 汇总原型验证及其局限。
-章节沿用 [FLIP Template][flip-template]。
+# FLIP-XXX：Python Worker CPU 与内存性能分析
 
 ## Motivation
 
-在 PyFlink 的进程执行模式下，用户函数及相关的数据处理运行在独立的 Python worker 中。
-在实时多模态等作业中，这些 worker 还需要执行图片解码、特征转换和模型推理。
-例如，作业通过 PyTorch 加载 YOLO 模型，对持续到达的图片进行预处理和推理。
-图片解码、张量转换、数据编解码和模型计算增加了 CPU 开销；模型参数、图片、张量及批次中间结果
-则增加了进程内存需求。这些开销既可能来自 Python 代码，也可能来自依赖库内部的原生代码。
-[PyTorch 执行时间与张量内存分析][pytorch-profiling]
+随着 AI 生态的发展，深度学习框架和预训练模型越来越广泛地应用于图像、视频等多模态数据处理， PyFlink 也越来越多地被用于实时多模态分析，将 Python 生态中的 AI 能力接入持续运行的流处理作业。 例如，实时视频流分析作业会通过 PyTorch 加载 YOLO 模型，对持续到达的图片进行预处理、目标检测方便后续分析。在 PyFlink 的进程执行模式下，这些逻辑运行在独立的 Python worker 进程中。图片解码、张量转换、数据编解码和模型推理带来了更多 CPU 开销；模型参数、体积较大的图片与张量，以及批次中间结果则增加了内存需求。这些资源消耗既可能来自 Python 代码，也可能来自依赖库内部的原生代码， 使 Python worker 的 CPU 和内存问题成为这类作业中需要重点关注的对象。
 
 这类作业有两个典型的诊断场景：
 
-- **CPU 开销较高，吞吐下降或处理延迟上升。** 用户需要知道时间主要消耗在哪些调用路径上，
-  例如图片解码和预处理、数据转换与编解码、用户函数，或框架内部的原生计算，才能确定优化方向。
-- **Python worker 内存持续增长或出现较高峰值，导致容器面临 OOM 风险。** 用户需要了解
-  关键时段内存从哪些调用路径分配、哪些分配仍未释放，并结合模型加载、图片与张量中间结果、
-  批次缓冲等业务行为，分析内存占用的来源。
+*   **性能：CPU 开销较高，吞吐下降或处理延迟上升。** 用户需要找出主要消耗 CPU 的调用路径，判断瓶颈位于图片解码与预处理、数据转换与编解码、用户函数，还是依赖库内部的原生计算，从而确定优化方向。
 
-CPU 使用率和进程内存指标能够反映资源压力，但不足以将问题定位到具体代码。
-用户还需要与问题发生时段对应的调用栈或内存分配栈，以及便于查看热点、保存和共享的分析结果。
-内存分配记录需要结合进程内存指标解读；采集结束时仍未释放的分配，并不直接等同于内存泄漏。
+*   **稳定性：Python worker 内存持续增长或出现较高峰值，导致容器面临 OOM 风险。** 用户需要了解问题发生时段的内存由哪些调用路径分配、哪些分配仍未释放，并结合模型加载、图片与张量中间结果、批次缓冲等业务行为，分析内存占用的来源。
 
-Flink 已有的诊断能力尚未完整覆盖这些需求。[FLIP-375][flip-375] 为 JobManager 和 TaskManager
-提供了 JVM profiling 的触发、状态查询和结果下载，但无法直接展示独立 Python worker 的调用栈。
-PyFlink 现有的 `python.profile.enabled` 使用 cProfile，在 bundle 处理期间收集函数调用统计并输出到日志。
-这一接入方式有助于分析函数耗时，但尚未提供运行中按需选择采集窗口、下载分析文件和查看可视化结果的完整流程，
-也不提供内存分配分析。逐函数调用跟踪在调用密集的负载上还可能显著增加执行开销，影响吞吐与背压，
-因此在线诊断需要考虑采集本身对作业的干扰。
 
-Python 生态已有成熟的性能分析工具，但在分布式部署中使用它们仍有操作成本。
-用户通常需要进入目标 Pod 或主机、识别对应的 Python worker、准备工具及所需权限、执行采集并取回结果。
-对于需要在进程内采集的工具，还需要安排其启停，避免将诊断逻辑散落到业务函数中。
-这些步骤缺少与 Flink 运行管理的统一衔接，使一次常规的 CPU 或内存问题定位依赖较多手工操作。
+CPU 使用率和进程内存指标能够反映资源压力，但不足以将问题定位到具体代码。用户还需要与问题发生时段对应的调用栈或内存分配栈，以及便于查看热点、保存和共享的分析结果。Flink 已有的诊断能力尚未完整覆盖这些需求。[FLIP-375](https://cwiki.apache.org/confluence/spaces/FLINK/pages/272927211/FLIP-375%2BBuilt-in%2Bcross-platform%2Bpowerful%2Bjava%2Bprofiler) 为 JobManager 和 TaskManager提供了 JVM profiling 的触发、状态查询和结果下载，但无法直接展示独立 Python worker 的调用栈。PyFlink 现有的 `python.profile.enabled` 使用 cProfile，在 bundle 处理期间收集函数调用统计并输出到日志。这一接入方式有助于分析函数耗时，但尚未提供运行中按需选择采集窗口、下载分析文件和查看可视化结果的完整流程，也不提供内存分配分析。逐函数调用跟踪在调用密集的负载上还可能显著增加执行开销(可能慢[1.7倍](https://arxiv.org/pdf/2212.07597))，影响吞吐与背压，因此在线诊断需要考虑采集本身对作业的干扰。
 
-本提案希望降低从 Python worker 资源异常定位到具体代码的成本：使用户无需修改业务函数，
-即可在明确启用和限定采集窗口的条件下，获得可保存、可视化分析的诊断结果。
-采集应尽量降低对正常处理的干扰，并复用 Flink 已有的进程管理和 profiling 能力，
-让 Python worker 的诊断成为作业运维中的常规操作。
+Python 生态已有成熟的性能分析工具，但在分布式部署中使用它们仍有操作成本。用户通常需要进入目标 Pod 或主机，识别对应的 Python worker，准备工具及所需权限，执行采集并取回结果。对于需要在进程内采集的工具，还需要安排采集的启停，避免将诊断逻辑散落到业务函数中。这些步骤缺少与 Flink 运行管理的统一衔接，使一次常规的 CPU 或内存问题定位依赖较多手工操作。本提案希望降低从 Python worker 资源异常定位到具体代码的成本：用户无需修改业务函数，即可在明确启用和限定采集窗口的条件下，获得可保存、可视化分析的诊断结果。采集应尽量降低对正常处理的干扰，并复用 Flink 已有的进程管理和 profiling 能力，让 Python worker 的诊断成为作业运维中的常规操作。
 
-### Goals and non-goals
+相关的 [FLINK-39153：Add comprehensive performance metrics for PyFlink](https://issues.apache.org/jira/browse/FLINK-39153) 关注处理链路耗时与 Python 进程健康等性能指标。两者互补：metrics 帮助发现资源压力并选择诊断时段，本提案通过调用栈和内存分配栈进一步定位代码。本提案不以该 Jira 的实现为前提。
 
-首版覆盖 Linux 上与 TaskManager（TM）同机、同 PID namespace 的 standalone Python worker。
-这里 standalone 指独立的 Beam Python worker 进程，不限定为 Flink Standalone 集群部署。
-管理员预先准备工具和权限，用户无需修改 UDF。一个 worker 可能服务多个算子，报告描述整个进程。
+### Goals and non-goals
 
-| 正式范围 | 首版行为 |
+本提案面向以进程模式运行的 PyFlink 作业，为 Python worker 提供 CPU 和内存分析能力。用户无需修改业务函数，即可定位计算热点和内存分配来源。工具依赖和运行权限由部署方准备，具体平台及工具版本的支持范围在兼容性说明中列出。采集以 worker 进程为单位，算子和 subtask 信息用于辅助选择目标。多个算子共享同一个 worker 时，报告覆盖整个进程，不单独归因到某个算子。
+
+下述示例来自原型的真实采集，用于展示 CPU 和内存分析能够提供的诊断结果。
+
+**CPU 分析：进程外采样**
+
+用户在现有 TaskManager（TM）Profiler 页面选择运行中的 Python worker，由 py-spy 在 worker 进程外进行限时采样，生成调用栈火焰图。采集产物为 SVG 文件，展示采集窗口内的调用栈及样本分布，下载后可直接在浏览器中查看。
+
+以下截图来自单 TM、单 slot、两个未融合的 Python 算子，关闭了Python managed memory。选择 `infer-images` worker（PID 1757），请求采集 5 秒，py-spy 0.4.3 以 50 Hz 采样，`includeNative=false`、`includeIdle=false`。
+
+![pyspy-flamegraph.png](figures/pyspy-flamegraph.png)
+
+图中可沿 Beam/PyFlink 调用链定位到 `InferImages.map` 和 `infer_hotspot`。
+
+**内存分析：进程内采集**
+
+使用[Memray](https://github.com/bloomberg/memray) 工具在 Python worker 进程内跟踪内存分配，支持两种接入方式：
+
+*   **API 集成**：Flink 在 worker 启动入口集成 Memray 公共 `Tracker` API，按作业配置安排一次限时采集。采集可以立即开始，也可以延迟开始，用户无需修改业务函数。
+
+*   **动态 attach**：用户在页面选择运行中的 worker，由外部命令注入 Memray 采集逻辑，实际跟踪仍在 worker 进程内进行。该能力需单独启用，并明确提示注入可能导致进程崩溃或死锁的风险。
+
+
+两种方式的直接产物都是 Memray 原始 `.bin` 录制文件，保存采集窗口内跟踪到的内存分配、释放事件及相关调用栈。`.bin` 本身不是火焰图；下载后可用 Memray 离线生成 HTML 火焰图、文本统计（stats）和终端树状报告（tree）。以下分别展示原始录制文件的验证结果，以及同一份录制文件生成的三种分析报告。
+
+**API 集成：原始录制文件**
+
+standalone 集群实验使用 Memray 1.20.0，通过作业配置启用 Memray API 集成，得到以下采集结果：
+
+| 验证项 | 实际结果 |
 | --- | --- |
-| CPU 分析 | 在现有 TM Profiler 页面选择运行中的 worker，由 py-spy 在进程外采样。 |
-| 启动期内存分析 | 启动 hook 在 worker 内调用 Memray 公共 `Tracker` API，可延迟开始；每次 worker 启动只录一个窗口。 |
-| 按需内存分析 | 在页面选择运行中的 worker，参考 Ray 使用 Memray `attach/detach`；单独启用并明确提示注入风险。 |
-| 产物 | CPU 火焰图 SVG 和 Memray 原始 `.bin` 录制文件写入 TM 配置目录，复用现有文件/BLOB 下载；HTML、stats、tree 由 Memray 离线生成。 |
+| 采集计划 | 启用 API 采集，延迟 2 秒开始，请求采集 4 秒。 |
+| 目标与产物 | worker PID 为 9368，在配置目录生成 94,208 字节的完整 `.bin` 文件。 |
+| 文件验证 | 通过已有下载接口取回的文件与 TM 本地文件逐字节一致；Memray FileReader 可读取并找到已知分配栈。 |
+| 采集后的作业状态 | Tracker 关闭后，作业仍为 `RUNNING`。 |
 
-两种内存方式都属于本提案的正式功能，启用方式和生命周期不同。
-首版不包含内存报告自动渲染、新查看器、持续 profiling、GPU 分析、算子独占归因、远程存储或通用 profiler SPI。
-嵌入式/thread、客户端 loopback、远程 worker 和用户创建的子进程也不在范围内。
-具体工具、CPython 与 Linux 组合需要经过真实验证后才能列为发布支持。
+这项验证使用图片缓冲区和 zlib 合成负载，验证了延迟采集、文件关闭、下载和作业继续运行。 它不构成模型初始化内存覆盖或生产开销的验证；下方 Memray 离线 HTML 报告截图来自独立的动态 attach 实验。
 
-## Public Interfaces
+**动态 attach：原始录制文件与离线报告**
 
-### Configuration and optional dependencies
+2026-11-07 的单 TM、双 Python 算子实验中，通过 REST 对 `infer-images` worker （PID 1757）发起 5 秒动态 attach，`includeNative=false`，会话最终为 `FINISHED`。 本次采集生成 `.bin` 录制文件，Memray 元数据中的 PID 与所选 worker 一致，下载文件与 TM 本地文件逐字节一致。下图是使用 Memray 1.20.0 将下载的 `.bin` 离线转换为 HTML 火焰图后的截图，展示其分析效果。Flink 提供下载的是原始录制文件，图中的报告由 Memray 工具单独生成。
 
-Flink 提供接入并维护相应约定，工具作为可选部署依赖。
-py-spy 必须可被 TM 执行，Memray 必须能被 worker 实际使用的 Python 环境导入；
-仅在同一 Pod 的另一个解释器中安装不够。按需内存分析还需要配置 Memray CLI 并满足注入所需条件。
-CPU 与内存依赖相互独立；任一方式配置后都应支持 worker 登记/发现，不能只用 py-spy 路径作为总门槛。
-Flink 不安装包、不调用 sudo，也不修改宿主机或容器权限。
+![memray-result.png](figures/memray-result.png)
 
-| Configuration | Default | Contract |
+峰值分配图能定位到 `allocate_feature_buffer`，悬浮提示约 2.4 MB、9 次分配。 宽度表示采集窗口内记录的峰值时仍存活分配的字节数，不等于整个进程的 RSS，也不代表已确认泄漏。
+
+**stats：分配统计**
+
+同一份 `.bin` 也可以生成文本统计。以下命令中的 `recording.bin` 表示下载后的录制文件：
+
+```sh
+python -m memray stats -n 5 recording.bin
+```
+
+本次录制的完整 stats 输出如下：
+
+```text
+📏 Total allocations:
+    81920
+
+📦 Total memory allocated:
+    198.816MB
+
+📈 Peak memory usage:
+    2.625MB
+
+📊 Histogram of allocation size:
+    min: 1.000B
+    --------------------------------------------
+    < 3.000B   :  1152 ▇▇
+    < 12.000B  :     9 ▇
+    < 42.000B  : 15219 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+    < 147.000B : 17820 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+    < 512.000B : 24057 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+    < 1.782kB  : 19027 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+    < 6.208kB  :  3460 ▇▇▇▇
+    < 21.618kB :   600 ▇
+    < 75.281kB :     4 ▇
+    <=262.144kB:   572 ▇
+    --------------------------------------------
+    max: 262.145kB
+
+📂 Allocator type distribution:
+     MALLOC: 42309
+     REALLOC: 38409
+     CALLOC: 628
+     MMAP: 574
+
+🥇 Top 5 largest allocating locations (by size):
+    - allocate_feature_buffer:/opt/flink-python/dev/worker_profiling/operator_binding_smoke.py:49 -> 149.947MB
+    - <stack trace unavailable> -> 10.734MB
+    - process_bundle:/usr/local/lib/python3.11/site-packages/apache_beam/runners/worker/sdk_worker.py:703 -> 10.272MB
+    - process_bundle:/usr/local/lib/python3.11/site-packages/apache_beam/runners/worker/sdk_worker.py:705 -> 8.471MB
+    - create_monitoring_info:/usr/local/lib/python3.11/site-packages/apache_beam/metrics/monitoring_infos.py:396 -> 6.656MB
+
+🥇 Top 5 largest allocating locations (by number of allocations):
+    - consume_request_iterator:/usr/local/lib/python3.11/site-packages/grpc/_channel.py:311 -> 13738
+    - create_monitoring_info:/usr/local/lib/python3.11/site-packages/apache_beam/metrics/monitoring_infos.py:396 -> 12606
+    - <stack trace unavailable> -> 11735
+    - process_bundle:/usr/local/lib/python3.11/site-packages/apache_beam/runners/worker/sdk_worker.py:705 -> 9168
+    - wait:/usr/local/lib/python3.11/threading.py:320 -> 6587
+
+🥇 Top 5 allocating modules (by size):
+    - dev: 149.947MB total | 572 allocations
+    - apache_beam: 30.805MB total | 45426 allocations
+    - <root>: 10.735MB total | 11737 allocations
+    - grpc: 7.321MB total | 24148 allocations
+    - _memray_attach_hook: 6.024kB total | 15 allocations
+
+🥇 Top 5 allocating modules (by number of allocations):
+    - apache_beam: 30.805MB total | 45426 allocations
+    - grpc: 7.321MB total | 24148 allocations
+    - <root>: 10.735MB total | 11737 allocations
+    - dev: 149.947MB total | 572 allocations
+    - pyflink: 2.024kB total | 22 allocations
+```
+
+这表示采集窗口内累计发生 81,920 次分配，累计分配量约 198.816 MB，窗口内被跟踪分配的峰值占用约 2.625 MB。 累计分配量包含已经释放的分配，不能当作当前内存占用。完整报告按累计分配量排序的首位是 `allocate_feature_buffer`，约 149.947 MB；还包含分配大小分布、allocator 类型和按分配次数排序的位置。
+
+**tree：峰值内存调用树**
+
+```sh
+python -m memray tree recording.bin
+```
+
+该命令打开交互式终端视图，按调用层次展示峰值时仍存活的分配。 下图从同一份 `.bin` 生成，选中了 `allocate_feature_buffer`：
+
+![memray-tree.png](figures/memray-tree.png)
+
+所选调用路径在峰值时占用 2.359 MB，约为本次峰值的 89.87%，对应 9 次仍存活的分配。 这与 stats 中该位置累计分配的 149.947 MB 是不同口径。tree 与默认 HTML 火焰图展示相同的峰值分配视角，分别适合在终端中沿调用树查看、在浏览器中交互查看；二者都不等同于进程 RSS。完整验证范围和限制见附录 A。
+
+**结果保存与下载**
+
+Flink 首版提供 SVG 和 `.bin` 文件的落盘与下载能力，结果写入 `rest.profiling.dir` 指定的 TM 本地目录，复用现有文件上传与 BLOB 下载链路。Memray 的 HTML、统计和树状报告由用户下载录制文件后生成，Flink 不内置报告渲染服务。CPU 和内存采集复用现有 profiling 的状态查询、结果目录和下载流程。Python CPU 和两种内存入口共用一个 Python 采集名额，同一 TM 上的不同 worker 串行采集；JVM profiling 使用独立名额，不因 Python 采集停止失败而被阻塞。每个 worker 分别保留最新一次成功的 CPU 和内存结果，API 集成和动态 attach 共用内存结果，同时受 TM 级结果保留上限约束。
+
+**非目标**
+
+首版不包含以下能力：
+
+*   同时对同一 TM 上的多个 Python worker 进行 profiling；首版不增加 Python worker 的并行采集调度。
+
+*   持续 profiling、自动周期性采集或 GPU 性能分析。
+
+*   将共享 worker 的资源消耗独立归因到某个算子或 UDF。
+
+*   在 Flink 内自动渲染内存报告，或新增专用报告查看器。
+
+*   覆盖嵌入式/线程执行模式、客户端 loopback、远程 worker 或用户自行创建的子进程。
+
+*   新建通用 profiler SPI、独立控制服务或远程产物存储与归档系统。
+
+
+## Public Interfaces
+
+CPU 和内存动态 attach 在 TM Profiler 页面按需发起，也可以通过 REST 操作。内存 API 集成由作业配置自动触发，采集开始后使用相同的状态查询和结果下载接口。
+
+### 配置描述
+
+部署方预先安装工具并准备所需权限。py-spy 必须可被 TM 执行；Memray 必须安装在 worker 实际使用的Python 环境中。两者是独立的可选依赖，Flink 不自动安装工具或提升权限。
+
+以下 `rest.*` 配置由部署方在集群侧设置，用于控制可选诊断能力、工具路径和资源边界；`python.memory-profiling.startup.*` 是作业侧的采集计划。`rest.profiling.enabled` 复用现有管理员总开关，控制本提案所有采集方式，包括不通过 REST 发起的 API 集成。该开关覆盖 REST 和 worker 启动入口两条触发路径。已有的 `python.profile.enabled` 继续指原有 cProfile，不重命名或替换。
+
+**共用配置**
+
+| 配置 | 默认值 | 含义 |
 | --- | --- | --- |
-| `rest.profiling.enabled` | `false`，已有 | 本提案所有 profiling 方式的总开关。 |
-| `rest.profiling.dir` | `java.io.tmpdir`，已有 | JVM、Python CPU 和两种内存采集共用的本地结果目录。 |
-| `rest.profiling.duration-max` | `300 s`，已有 | 单次请求的最大录制时长，也约束启动窗口；不是注入代码的硬截止时间。 |
-| `rest.profiling.history-size` | `10`，已有 | 每个 resource ID 的 REST 会话合计上限，包含 JVM、Python CPU 和内存 attach 会话。 |
-| `rest.python-profiling.cpu.executable` | 无，新增 | 管理员安装的 py-spy 绝对路径，不是通用命令入口。 |
-| `rest.python-profiling.memory.executable` | 无，新增 | TM 执行 attach/detach 使用的 Memray CLI 绝对路径；启动期直接调用 API 不需要此项。 |
-| `rest.python-profiling.memory.attach-enabled` | `false`，新增 | 部署层显式允许向运行中的 worker 注入 Memray；同时要求总开关和 Memray CLI。 |
-| `python.memory-profiling.startup.enabled` | `false`，新增 | 作业级启用：该作业使用的每个 standalone worker 启动时录制一次。 |
-| `python.memory-profiling.startup.delay` | `0 s`，新增 | 从 worker 启动 hook 到开启 Tracker 的非负延迟。 |
-| `python.memory-profiling.startup.duration` | `60 s`，新增 | 正数，受 TM 最大请求时长约束。 |
-| `python.memory-profiling.startup.native` | `false`，新增 | 启动录制包含 C/C++ 分配栈。 |
+| `rest.profiling.enabled` | `false`，已有 | 本提案所有采集方式的管理员总开关。 |
+| `rest.profiling.dir` | `java.io.tmpdir`，已有 | 本地结果目录；Python 采集文件保存在所属 TM 上。 |
+| `rest.profiling.duration-max` | `300 s`，已有 | 单次采集时长上限，适用于 CPU、内存 API 集成和动态 attach。 |
+| `rest.profiling.history-size` | `10`，已有 | 复用其值作为每个 TM 的 Python 已结束会话总数上限，覆盖不同 worker、重启前的进程实例及 CPU/内存类型。Python 与原有 JVM 历史分别计数，互不挤占。 |
 
-例如，集群可准备两个工具，但保持 attach 关闭：
+**CPU 配置**
+
+| 配置 | 默认值 | 含义 |
+| --- | --- | --- |
+| `rest.python-profiling.cpu.executable` | 无，新增 | py-spy 可执行文件的绝对路径。 |
+
+**内存配置**
+
+动态 attach 需要额外配置 Memray CLI 并显式启用：
+
+| 配置 | 默认值 | 含义 |
+| --- | --- | --- |
+| `rest.python-profiling.memory.executable` | 无，新增 | Memray CLI 的绝对路径。 |
+| `rest.python-profiling.memory.attach-enabled` | `false`，新增 | 允许向运行中的 worker 动态 attach Memray。 |
+
+例如，开启 profiling、指定结果目录和工具路径，同时保持动态 attach 关闭：
 
 ```yaml
 rest.profiling.enabled: true
@@ -129,7 +215,16 @@ rest.python-profiling.memory.executable: /opt/diagnostics/bin/memray
 rest.python-profiling.memory.attach-enabled: false
 ```
 
-在启用上述总开关的部署中，作业可单独启用启动录制：
+API 集成方式通过以下作业配置启用，不需要 Memray CLI 路径或 attach 开关，但仍受 profiling 总开关控制：
+
+| 配置 | 默认值 | 含义 |
+| --- | --- | --- |
+| `python.memory-profiling.startup.enabled` | `false`，新增 | 每次 worker 启动时安排一次内存采集尝试；开始时若 Python 名额已被占用，本次跳过，不保证每个 worker 都获得录制文件。 |
+| `python.memory-profiling.startup.delay` | `0 s`，新增 | worker 启动后到尝试开始采集的非负延迟。 |
+| `python.memory-profiling.startup.duration` | `60 s`，新增 | 单次采集时长，必须为正数且不超过目标 TM 的 `rest.profiling.duration-max`。 |
+| `python.memory-profiling.startup.native` | `false`，新增 | 是否包含 C/C++ 分配栈。 |
+
+例如，作业可以在每次 worker 启动后等待 120 秒，再采集 60 秒：
 
 ```yaml
 python.memory-profiling.startup.enabled: true
@@ -138,341 +233,331 @@ python.memory-profiling.startup.duration: 60 s
 python.memory-profiling.startup.native: true
 ```
 
-复用现有 Python 配置、依赖准备及受管理的环境变量传递。TM 将生效的绝对结果目录传给 worker，
-避免 archives/virtualenv 工作目录改变路径含义；不再新增内存结果目录配置。
-工具路径、启用状态与目录来自部署或作业配置，不能由采集请求指定。
-本版要求 worker 在启用后启动，不增加动态配置重载。
+目标 TM 使用自身生效的总开关、结果目录和时长上限准备 worker 环境，再由 worker 在启动采集前校验作业计划。作业提交客户端不需要获取远程集群配置。总开关关闭时不安排采集；时长超限、缺少 Memray 等可处理的准备错误不会阻止 UDF 启动，并记录失败原因。
 
-### Worker discovery
+CPU 和动态 attach 的时长在每次采集请求中指定；API 集成方式的时长在作业配置中指定。`rest.profiling.duration-max` 是上限，不是默认采集时长。工具路径和结果目录不能通过采集请求覆盖。已有 worker 需要重启以应用依赖准备和启动配置，首版不提供动态配置重载。
 
-沿用提议中的 `GET /taskmanagers/:tm/python-workers`：
+### 选择 worker
 
+用户进入 TaskManager 的 Profiler 页面，选择 Python，再从列表中选择目标 worker。 页面通过以下接口获取该 TM 上运行中的 Python worker：
+
+```http
+GET /taskmanagers/:tm/python-workers
+```
 ```json
-{"workers": [{"id": "<opaque-worker-handle>", "pid": 12345,
-              "memoryProfilingAvailable": true,
-              "operators": [{"jobId": "<job-id>", "operatorId": "<operator-id>",
-                             "operatorName": "infer-images", "subtaskIndex": 0,
-                             "attemptNumber": 0}]}]}
+{
+  "workers": [
+    {
+      "id": "<opaque-worker-handle>",
+      "pid": 12345,
+      "memoryAttachAvailable": true,
+      "operators": [
+        {
+          "jobId": "<job-id>",
+          "operatorId": "<operator-id>",
+          "operatorName": "infer-images",
+          "subtaskIndex": 0,
+          "attemptNumber": 0
+        }
+      ]
+    }
+  ]
+}
 ```
 
-`id` 绑定该 TM 和本次 worker 进程实例，`pid` 用于展示；重启后使用新句柄，不接受客户端任意 PID。
-内部启动标识、Beam ID、依赖版本和登记文件均不是公共字段。
+| 字段 | 用途 |
+| --- | --- |
+| `id` | 后续请求中的 `workerId`，绑定该 TM 和本次 worker 进程实例。 |
+| `pid` | 帮助用户识别进程；采集请求不接受任意 PID。 |
+| `operators` | 当前关联的作业、算子、subtask 和 attempt；subtask 索引从 0 开始，算子名使用原始名称。 |
+| `memoryAttachAvailable` | 表示该 worker 的 Memray attach 开关和依赖已准备好，不保证注入权限或 native 栈支持。 |
 
-`operators` 列出当前关联的 Flink Python 算子，包括作业 ID、算子 ID、原始算子名、从 0 开始的
-subtask 索引和 attempt 编号。共享 worker 可关联多个算子；融合后的算子按运行时算子列出，不拆解每个 UDF。
-列表是发现时的快照，登记尚未完成或失败时可以为空，不能据此认定进程空闲。
-页面用这些字段辅助选进程，采集仍覆盖整个 worker，不能把共享进程的 CPU/内存结果归属于某一个算子。
+一个 worker 可以关联多个算子，采集结果覆盖整个进程。融合后的算子按运行时算子展示，不拆解每个 UDF。关联信息是查询时的快照，列表暂时为空不表示进程空闲。worker 重启后获得新 `id`，旧选择失效时页面清空选择，不自动切换到另一个 worker。
 
-`memoryProfilingAvailable` 表示该 worker 已准备好按需内存分析，包括部署开关和实际 Python 环境中
-Memray 导入成功；不保证注入权限或 native 栈支持。准备失败记录日志，不阻断普通 worker 启动。
-启动录制正在进行属于忙状态，不能据此再 attach 一个 Tracker。CPU 能力保持独立。
+![flink-web-ui.png](figures/flink-web-ui.png)
 
-### REST capture requests and responses
+真实 POC 截图（2026-11-07）：单 TM、单 slot，关闭 Python managed memory，两个未融合算子分别运行于 PID 1758 和 1757。页面显示算子、subtask、attempt 与 PID。该截图展示 worker 选择流程；后续原型对齐情况见附录 A。
 
-扩展现有 `POST /taskmanagers/:tm/profiler`。原 JVM 请求继续使用 `mode` 和 `duration`。
-新增 Python 请求显式选择 `type`：
+### 发起采集
 
-```json
-{"workerId": "<opaque-worker-handle>", "type": "CPU", "duration": 30,
- "includeNative": false, "includeIdle": false}
+选定 worker 后，用户选择 CPU 或 Memory、填写时长，再发起采集。页面中的 Memory 表示动态 attach。时长默认预填 30 秒；`includeNative`、`includeIdle` 作为高级选项，默认关闭，后者仅在 CPU 模式显示。
+
+两种按需采集共用现有入口：
+
+```http
+POST /taskmanagers/:tm/profiler
 ```
 
+CPU 请求示例：
+
 ```json
-{"workerId": "<opaque-worker-handle>", "type": "MEMORY", "duration": 30,
- "includeNative": false}
+{
+  "workerId": "<opaque-worker-handle>",
+  "type": "CPU",
+  "duration": 30,
+  "includeNative": false,
+  "includeIdle": false
+}
 ```
 
-| Field | Contract |
+内存动态 attach 请求示例：
+
+```json
+{
+  "workerId": "<opaque-worker-handle>",
+  "type": "MEMORY",
+  "duration": 30,
+  "includeNative": false
+}
+```
+
+| 参数 | 必填 / 默认值 | 含义 |
+| --- | --- | --- |
+| `workerId` | 必填 | worker 列表返回的有效 `id`。 |
+| `type` | 必填 | `CPU` 或 `MEMORY`，后者表示动态 attach。 |
+| `duration` | 必填 | 本次采集时长，单位为整数秒，必须为正数且不超过 `rest.profiling.duration-max`。 |
+| `includeNative` | 可选，`false` | 包含原生代码调用栈或内存分配栈。 |
+| `includeIdle` | 可选，`false` | CPU 采样包含等待、空闲线程，对应 py-spy `--idle`；内存请求不能携带该字段。 |
+
+`includeIdle` 可辅助排查低 CPU、低吞吐时的同步 I/O、锁或队列等待。开启后，火焰图的样本占比包含等待，不能直接解释为 CPU 消耗比例，也不提供逐请求的 I/O 延迟统计。不支持的显式选项报错，不静默降级。**Memray 动态 attach 可能使目标 worker 崩溃或死锁，并影响作业。** 管理员必须先启用 `rest.python-profiling.memory.attach-enabled`，页面在发起请求前展示风险并要求确认。 REST 使用说明提供相同提示。Memray 官方建议将 attach 用于开发环境调试。[风险说明](https://github.com/bloomberg/memray/blob/v1.20.0/docs/attach.rst)
+
+首版将 JVM profiling 与 Python profiling 的活动名额分开管理：JVM profiling 保留现有单活动采集限制；Python CPU、内存 API 和动态 attach 共用一个 Python 名额，不同 worker 不并行采集。若多个 TM 共用一个 JVM，也共享该 JVM 的 Python 名额；独立 JVM 的 TM 可各自采集。JVM 与 Python 采集互不占用对方名额，Python 内存停止未确认也不阻塞 JVM profiling。
+
+API 集成不经过手动选择和 REST 创建。每次 worker 启动后按作业配置安排一次尝试，延迟等待不占名额；真正开始时若 Python 名额已被占用，本次跳过，不排队、不重试，也不影响作业执行。跳过或可处理的准备失败记录日志，并通过同一状态查询返回 `FAILED` 和明确的 `message`，说明本次窗口未开始；若状态文件本身无法发布，则通过 worker 日志报告。管理员总开关关闭时不创建采集会话。相关请求错误码如下：
+
+启动窗口与按需采集采用相同规则：先成功取得 Python 名额的一方继续执行，不按触发方式设置优先级，也不抢占已有采集。按需采集正在运行时，新的 API 窗口跳过并记录失败原因；API 采集正在运行时，新的按需请求返回 `409`。多个 worker 同时开始 API 窗口时，只允许取得名额的一个录制，其余跳过，不自动补录。因此，多 slot TM 上一次启动或 failover 可能只得到部分 worker、甚至仅一个 worker 的录制文件。用户文档必须在启动采集配置和使用示例中明确说明这一行为及查询跳过原因的方法。
+
+| 请求未受理的原因 | HTTP 状态 |
 | --- | --- |
-| `workerId` | Python 请求必填，必须是该 TM 上的有效句柄；与 JVM `mode` 互斥。 |
-| `type` | Python 请求必填：`CPU` 或 `MEMORY`；REST 中的 `MEMORY` 表示按需 attach。 |
-| `duration` | 必填，正整数秒，不超过 `rest.profiling.duration-max`。 |
-| `includeNative` | 可选布尔值，默认 `false`，适用于两种 Python 类型。 |
-| `includeIdle` | 可选布尔值，默认 `false`，仅限 CPU；内存请求中出现该字段即非法。 |
+| 参数类型、组合、时长或查询 target 不合法 | `400` |
+| TM 或 worker 不存在、句柄已失效 | `404` |
+| Python 采集名额已占用，或存在已知的 worker 采集冲突 | `409`，不排队；JVM 采集本身不占 Python 名额 |
+| 工具或 worker 依赖不可用、平台不支持、attach 未启用 | `503` |
 
-不增加任意工具参数、输出路径、采样率、渲染格式或 Python allocator tracing 参数。
-显式选项不受支持时失败，不静默降级。JM profiler 不接受 Python worker 请求。
-启动采集由作业配置触发，不通过此 REST 请求提交。
-请求沿用现有 JSON 对象结构；新增字段在 schema 中可选，由请求校验约束 JVM/Python 的合法组合。
-原有 JVM 请求不需要携带 Python 字段。
+原 JVM 请求继续使用 `mode` 和 `duration`，无需携带 Python 字段；Python 的 `workerId` 与 JVM `mode` 互斥。Python worker 采集只在 TaskManager Profiler 中提供，JobManager Profiler 不接受此类请求。
 
-受理后返回 HTTP 200 和现有 `RUNNING`、`FINISHED`、`FAILED` 会话模型。
-保留 `status`、`triggerTime`、`finishedTime`、`duration`、`message`、`outputFile`。
-Python 响应增加 `worker`、`type` 和适用的布尔选项，省略 JVM 专用 `mode` 及 `profilingMode`。
-`outputFile` 仍是单个生成文件名：CPU 对应 SVG，内存对应 `.bin`。
-实际录制时间和工具版本写入产物或日志；请求时长不代表精确的实际耗时。
+请求和响应继续使用固定 JSON schema，在现有对象中增加可选的 Python 字段，由请求校验约束合法组合。GET 通过 `target` 筛选同一响应结构中的会话列表，原有 JVM 客户端无需携带 Python 字段。
 
-内存 `FINISHED` 要求确认 Tracker 已停止并关闭录制文件。attach CLI 返回、计时结束、
-文件可读取都不能单独作为完成证据。有效的零分配窗口不沿用 CPU 的“零样本失败”规则。
+### 查看状态
 
-### History, downloads, and concurrency
+创建请求返回 HTTP 200 表示已受理，**不代表采集已完成**。用户在页面查看状态或调用：
 
-保留现有入口：`GET /taskmanagers/:tm/profiler` 默认返回 JVM 历史，`?target=jvm` 与之等价；
-`?target=python` 返回 CPU 和内存 attach 会话，以 `type` 区分。
-`GET /taskmanagers/:tm/profiler/:filename` 复用 TM 文件上传与 transient BLOB 链路下载两种产物。
-不新增内存专用历史或下载服务。
+```http
+GET /taskmanagers/:tm/profiler?target=python
+```
 
-REST 会话继承现有 **Flink JVM 级单活动会话限制**。同一 JVM 中的多个 TM，以及同进程的 JM/TM，
-共享名额；常规部署通常是一个 TM 一个 JVM。历史仍按 resource ID 分组，先限制该 resource 的合计数量，
-再按目标筛选；Python 会话可以淘汰较早的 JVM 会话。UI 和 409 提示应准确描述此作用域。
+CPU、动态 attach，以及 API 集成的采集尝试使用同一查询入口，按 worker 和采集类型区分。API 延迟等待期间尚未创建会话；到达计划时段后，已开始或因忙、准备失败而未能开始的尝试均可查询：
 
-启动录制由 worker 自行触发，不申请 REST 会话名额，首版也不自动导入 REST 历史；多个 worker 可以同时录制。
-日志提供生成的文件名、PID、实际起止时间和完成状态。用户可从 TM 目录取回完整文件，
-也可凭日志中的文件名使用已有下载 URL。这里明确不新增 worker→TM 会话上报协议。
-
-同一 worker 的启动内存窗口尚在等待或录制时，TM 不得再次 attach Memray。
-复用私有 worker 登记元信息表达这些状态变化，不增加命令或心跳服务。
-同一 worker 不支持同时运行多个 Memray Tracker，也不支持 Memray 与 cProfile 并行采集。
-Flink 控制内存采集窗口期间，管理员不得另外启动手工 Memray 会话；CLI 没有 Flink 会话所有权 token。
-
-### Result directory and retention
-
-在 `rest.profiling.dir` 下生成 `python-<uuid>.svg`、`python-memory-<uuid>.bin` 或
-`python-memory-startup-<pid>-<uuid>.bin`。先写临时文件，确认关闭后再发布最终文件名。
-不能删除或截断仍可能有 writer 活跃的录制文件。
-
-REST 历史淘汰清理其拥有的产物；已知关闭的失败文件可清理，停止不明的文件保留为明确的未完成产物。
-启动文件不受 REST 历史保留策略管理，由部署侧负责归档和清理，包括崩溃残留；每次 worker 重启都可能产生新文件。
-启用说明必须同时写明这一策略，启动采集默认关闭。反复 failover 可能累积录制文件；
-部署方需要为结果目录规划容量和清理策略。首版不自动按数量或时间淘汰启动文件。
-
-只清理本功能拥有的文件，不清空整个目录。复用既有 BLOB 缓存，淘汰不承诺撤销已下载或缓存的副本。
-TM 重启不恢复历史，持久卷保留文件而非会话；不新增远程存储或归档子系统。
-
-Python 下载只提供最终产物名，不提供录制中的文件。
-Python 产物按附件下载并设置 `nosniff`；SVG 额外设置受限 CSP，`.bin` 使用 `application/octet-stream`。
-原 JVM 下载行为保持不变。用户在匹配的 Memray 环境离线执行 `flamegraph`、`stats` 或 `tree`；
-native 报告需保留匹配的解释器、共享库和调试符号。
-首版暂不自动渲染，避免在 worker 中增加渲染子进程或为同一会话增加第二套产物字段。
-
-### Failure semantics and attach warning
-
-| 条件 | REST 行为 |
+| 状态 | 含义 |
 | --- | --- |
-| 类型、组合、时长或历史 target 非法 | HTTP 400。 |
-| TM 或 worker 句柄不存在、失效 | HTTP 404。 |
-| 共享 REST 会话名额占用，或已知存在冲突的内存采集 | HTTP 409，不排队、不覆盖。 |
-| 工具或 worker 依赖不可用、平台不支持、attach 未启用 | HTTP 503；其他能力仍可使用。 |
-| 受理后发生工具、权限、worker 退出、超时或存储错误 | `FAILED`，包含诊断信息及清理状态。 |
+| `RUNNING` | 采集正在进行，结果尚未准备好。 |
+| `FINISHED` | 采集已经结束，完整结果文件可供下载。 |
+| `FAILED` | 采集失败或 API 窗口未能开始，`message` 提供原因；不表示业务作业失败，也不替换之前成功的结果。 |
 
-配置类型和格式错误遵循 Flink 常规配置解析行为，可能导致作业启动失败。配置解析成功后，
-worker 中可处理的采集准备错误（如缺少 Memray、结果目录不可写或窗口参数不合法）记录日志并跳过采集，
-让普通 UDF 继续启动。这不是对 profiler 原生代码崩溃或死锁的隔离保证。
+响应沿用 `status`、`triggerTime`、`finishedTime`、`duration`、`message` 和 `outputFile`，并包含 Python 的 `worker`、`type` 和适用的采集选项。`outputFile` 是结果文件名，CPU 对应 SVG，内存对应 `.bin`；Python 响应不携带 JVM 专用的 `mode` 或 `profilingMode`。`duration` 是请求的采集窗口，工具初始化和文件收尾会影响实际耗时，不承诺计时结束时立即得到完整结果。若失败详情提示“停止未确认”，Python 采集名额继续保留，直到原 worker 退出；JVM profiling 仍可使用。两种内存方式均不保证硬停止期限，也不保证 OOM/SIGKILL 后存在完整产物。不带 `target` 或使用 `?target=jvm` 时，查询仍返回原有 JVM profiling 信息。
 
-**Memray attach 会向运行中的 worker 注入可执行代码，可能导致进程崩溃或死锁，并触发作业失败或恢复。**
-Memray 官方建议将该调试机制用于开发环境。部署开关默认关闭；Profiler 页面在内存 attach 前
-展示风险并要求显式确认，REST 使用说明也应明确同样的风险，不再增加“确认风险”的请求字段。
+### 下载结果
 
-启动 Tracker 方式避开 debugger 注入，但仍会改变分配行为、消耗资源，并依赖 Python 执行机会停止。
-两种方式均不保证硬截止时间，也不保证 OOM/SIGKILL 后存在完整产物。发布文档需保留这些边界。
-[Memray attach 风险说明][memray-attach]
+采集完成后，用户点击页面中的“下载火焰图”或“下载内存录制文件”，也可以使用响应中的 `outputFile` 调用：
 
-### Web UI
+```http
+GET /taskmanagers/:tm/profiler/:filename
+```
 
-复用 TM Profiler 页面：选择 JVM/Python、worker、CPU/Memory、时长及适用选项。
-页面中的 Memory 指 attach，必须展示风险并确认；分别呈现能力不可用、无 worker、发现失败和忙状态。
-旧 worker 失效时清空选择，不自动改选。历史区分 CPU/内存，提供“下载火焰图”或“下载内存录制文件”。
-创建成功后刷新当前目标历史。
-
-启动采集通过作业配置，文件名写入日志；页面说明其不属于 REST 创建的历史会话。
-不增加路径输入、独立内存页面或自定义查看器。
-
-## Proposed Changes
-
-### Reuse and ownership
-
-| 既有模块/链路 | 责任 |
+| 文件 | 查看方式 |
 | --- | --- |
-| Python 依赖、环境准备和 Beam worker boot | 传递解析后的配置；保留 Beam 进程生命周期；登记真实进程身份及内存准备/启动采集状态。 |
-| 现有 REST → RM → TM RPC | 校验和转发 CPU/内存请求及历史查询。 |
-| 现有 `ProfilingService` | 管理 REST 会话、JVM 级名额、状态、历史与清理。 |
-| Python profiling 执行 | 在后台 executor 以固定 argv 调用 py-spy 或 Memray attach/detach，管理工具子进程。 |
-| 既有 `FileType.PROFILER` / BLOB | 从生效的结果目录提供生成的 SVG 或录制文件。 |
-| worker 启动 hook | 直接持有一个 Tracker 窗口，不在 UDF/bundle 热路径加 hook，也不提供额外控制端点。 |
+| CPU `.svg` | 下载后直接在浏览器中查看火焰图。 |
+| 内存 `.bin` | 下载后使用 Memray 离线生成 HTML 火焰图、stats 或 tree；API 集成和动态 attach 产物格式相同。 |
 
-本提案不新增本地命令 socket、worker 控制 RPC、插件注册表或通用 profiler SPI。
-CPU 与内存通过现有 profiling 入口分派到两个直接实现；`flink-runtime` 不依赖 Beam 实现类。
-内存功能关闭时不导入 Memray；启用准备不等于立刻开启跟踪，采集只在对应触发条件满足时开始。
+文件写入 `rest.profiling.dir` 指定的 TM 本地目录，录制中的文件不可下载，Flink 首版不自动生成内存分析报告。每个 worker、每类优先保留最新一次成功的完整结果：CPU 一份 SVG、内存一份 `.bin`，API 集成和动态 attach 共用内存结果。新采集成功后替换并清理同类旧结果，失败不替换之前的成功结果。
 
-### Worker identity and registration cleanup
+同时，每个 TM 内已结束且确认停止的 Python 会话总数受 `rest.profiling.history-size` 限制，成功、失败及跳过的尝试均计入，跨不同 worker 和重启前后的进程实例统一保留最新记录；超过上限按结束时间淘汰最旧记录，并清理其自有结果文件。总上限优先于每个 worker 的最新结果保留规则，因此旧的成功结果也可能因达到上限而过期。运行中或停止未确认的会话及其文件不参与淘汰。worker 退出不立即删除已发布结果，以便分析异常退出前的录制。Python 与原有 JVM 历史分别计数，原 JVM 保留规则不变。该上限约束当前 TM 生命周期内管理的会话和结果数量，不是文件字节数或目录磁盘配额。
 
-Beam 继续负责 worker 创建、退出和重启；TM 需要实际 SDK harness PID，而不是 shell 包装器 PID。
-复用现有启动/进程管理，由 Python boot 将实际 PID 和启动身份写入 TM 私有临时目录下的登记文件。
-该目录复用 TM working-directory 生命周期；TM 异常退出不保证立即删除残留，重新初始化该临时目录时清理。
+需要长期保留的文件由用户下载保存；TM 重启不恢复会话历史。结果目录的容量、持久化和异常退出残留由部署存储策略约束，不能依靠会话数量上限为单个 native 录制文件提供硬容量保证。
 
-发现、创建、执行工具前和发布结果前均验证进程存活、启动身份和 TM 管理归属。
-两个外部工具最终按 PID attach，验证与 attach 不是原子操作，需明确残余 PID 复用竞态。
+## Proposed Changes
 
-worker 正常退出删除登记；TM 在已有发现扫描中回收已确认失效的自有记录，覆盖 SIGKILL 和重复重启。
-保留存活登记与未知文件；检查/读取失败不等于进程已死。清理失败记录日志，不能隐藏其他有效 worker。
-不新增心跳或清理服务。
+### 架构总览
 
-算子关联复用 Beam 已有的 worker ID：runner 从现有 stage 的 instruction request handler 读取
-实际 worker ID，Python boot 沿用已有 `WORKER_ID`。通过现有环境准备链路增加 JobID，避免跨作业
-ID 冲突。Java 算子打开后写入自己的关联记录，关闭时删除；发现流程按 JobID + Beam worker ID
-合并到既有进程登记。共享 worker 自然得到多个关联，不另建进程池、引用计数或所有权服务。
-关联记录先写临时文件再原子发布。写入或发布发生 I/O 错误时，在登记调用内尽力清理临时文件，
-保留原始错误供调用方记录日志；不依赖之后的算子关闭，也不因清理失败覆盖原始错误。
-文件更新只发生在算子生命周期边界，不进入逐条记录或 bundle 热路径。
-当前 Beam 2.75.0 的接入点是 `FnApiControlClient.getWorkerId()`，仅 `flink-python` 依赖该 Beam 类。
-该关联针对当前 Flink 的 stage/environment 生命周期；若以后启用 Beam 环境轮换或负载均衡，需要重新验证。
+![Python worker profiling 架构](architecture.png)
 
-### CPU lifecycle
+按需采集沿用现有的 Web UI / REST → JobManager / ResourceManager → TaskManager 链路。TM 找到目标 worker 后，由现有 `ProfilingService` 管理采集会话，并在后台执行采集。CPU 使用独立的 py-spy 进程；内存采集器运行在 Python worker 内，由启动入口调用 API 或由外部 Memray CLI 动态 attach。两种方式生成的文件都写入 TM 结果目录，再通过现有文件/BLOB 链路下载。内存 API 集成从 worker 启动入口触发，也需要接入同一个采集会话管理流程。图中实线框表示复用或扩展的既有部分，虚线框表示本提案新增的接入。
 
-保持当前 py-spy 路径，固定 50 Hz，按请求追加 native/idle。
-受理、执行、历史、清理、下载复用已有基础设施。工具成功退出、存在产物且具有经验证的正样本完成信息后，
-才发布 `FINISHED`。例如 `Samples: N` 是对验证版本的输出约定，不是稳定的通用协议。
-无效或零样本结果失败，不回退到 cProfile。
+### 定位 worker 并关联算子
 
-CPU 后端从工具启动开始按实际经过时间计时；到期向 py-spy 发 SIGINT 请求停止采样并生成结果，
-另给有界收尾时间（当前 POC 为 10 秒）。仍不退出才终止/强杀采样器并标记失败，不能将强杀当作完整结果。
-初始化会占用该窗口，实际采样时间可能短于请求时长。保留工具自身的 duration 作为额外退出条件；
-已验证 py-spy 0.4.3 的该参数按采样轮数结束，慢 native 展开可能超出名义时长。
+首先需要把用户选择的算子/subtask 对应到一个真实的 Python worker 进程。worker 的创建、退出和重启继续由已有 Python/Beam 进程管理负责。本提案补充供 profiling 使用的进程发现和关联信息：Python worker 启动入口将实际 SDK harness PID、进程启动身份和 Beam worker ID 写入 TM 私有临时目录。记录实际 PID 是为了让外部工具访问真正执行业务的进程，避免使用 shell 包装器的 PID。
 
-TM 退出时取消并等待其所属采样器清理，不关闭被其他 TM 共用的 JVM 级 profiling service。
-迟到的 worker 查询不能在关闭开始后新建采集；工具等待不阻塞 TM RPC 或数据处理线程。
+`flink-runtime` 中的 `PythonWorkerRegistry` 读取进程登记，向 REST 返回绑定 TM 和进程实例的 worker 句柄。登记目录沿用 TM working-directory 生命周期。算子关联复用 Beam 已有的 worker ID：`flink-python` 的 runner 从 stage 的 instruction request handler 获取实际 worker ID，Python boot 沿用已有的 `WORKER_ID`。JobID 通过现有环境准备链路传递，避免不同作业的 ID 冲突。
 
-### Direct-API startup memory lifecycle
+Java 算子在打开后，将作业、算子、subtask 和 attempt 信息登记到 TM 共享的内存表，关闭时删除自己的关联；不再为算子关联写文件。TM 在查询时按 JobID + Beam worker ID 将内存表与进程登记合并，一个 worker 服务多个算子时自然得到多个关联。更新只发生在算子生命周期边界，不进入逐条记录或 bundle 热路径。共享内存表复用 TM 的 `SharedResources` 生命周期。
 
-standalone boot hook 准备可选 Memray 导入并安排一次采集。一个 worker 线程从进入到退出持有
-`Tracker` context，按实际窗口计时，结束后同一 worker 继续处理。
-harness 正常返回或抛出 Python 异常时，取消尚未开始的窗口，或关闭正在运行的 Tracker 一次。
+当前 Beam 2.75.0 的接入点是 `FnApiControlClient.getWorkerId()`，只有 `flink-python` 依赖该 Beam 类；`flink-runtime` 只处理普通登记数据和关联信息，不引入 Beam 依赖。以后若改变 Beam stage/environment 的复用或轮换方式，需要重新验证关联。TM 在发现、受理采集、启动工具和发布结果前检查进程存活、启动身份及 TM 归属，拒绝已失效的句柄。两个外部工具最终仍按 PID 访问进程；检查与实际 attach 不是原子操作，保留 PID 复用竞态这一能力边界。
 
-复用现有环境、archives 和 requirements 准备。目录来自 TM 解析后的 profiling 配置。
-hook 记录生效参数、工具版本、PID、实际时间和文件名；重启按同一配置重新生成文件，不续写前一次结果。
+进程登记和 API 采集状态采用 TM 私有目录中的 UTF-8 JSON 文件，是同一 Flink 版本的 Java/Python 实现之间的内部约定，不作为用户配置文件，也不支持跨版本协商：
 
-启动 hook 负责确认自身采集已关闭，`Tracker.__exit__` 完成后才将 `.bin.inprogress` 改名为完整 `.bin`。
-异常终止可能留下未完成文件。启动和 attach 的触发链不同，但使用相同 Memray 分配语义和产物格式。
+| 记录 | 路径与内容 |
+| --- | --- |
+| worker 进程登记 | `<TM-private-dir>/python-workers/<registration-id>.json`；包含 `registration_id`、`job_id`、Beam `worker_id`、实际 `pid`、`start_token`，以及内存 attach 可用和占用标记。`registration_id` 每次进程启动新建，不以复用 PID 覆盖旧实例。 |
+| API 采集状态 | 同目录下 `profiles/<registration-id>.json`；包含同一进程身份、`profile` 会话字段，以及表示 Tracker 是否已确认关闭的 `stop_confirmed`。忙时跳过也发布失败记录，不创建新的状态枚举。 |
 
-### On-demand memory lifecycle, following Ray
+Python 先写同目录临时文件，再通过原子替换发布完整记录；私有目录和文件仅允许运行用户访问。TM 只读取完整的自有记录，校验必需字段和进程身份，未知字段可忽略；格式损坏或读取失败记录日志，不据此推断进程已经退出。正常退出删除进程登记，异常退出的回收由已有发现流程完成。无需增加心跳、文件监听服务或独立控制协议。
 
-Ray Reporter Agent 调用 `memray attach`、等待、`detach`，随后生成报告。
-采用这种工具接入方式，同时保留 Flink 异步会话和 BLOB 链路。Ray manager 没有提供可复用的协作式
-worker 控制协议；Beam 2.75 Fn API 也没有 Memray 启停指令，其 bundle profiler factory 不等价于进程窗口。
-[Ray Agent][ray-agent] · [Ray Manager][ray-manager] · [Beam Fn API][beam-fn-api]
+### 接收请求与管理采集会话
 
-REST 内存请求按以下步骤执行：
+CPU 和动态 attach 请求经现有 REST/RPC 链路到达目标 TM，由 TM 校验目标、参数、工具配置和启用状态，再交给 `ProfilingService`。沿用已有 `RUNNING`、`FINISHED`、`FAILED` 状态。外部工具的等待与收尾复用后台执行能力，不阻塞 TM RPC 或数据处理线程；Python 的阻塞等待不使用 JVM profiler 的停止定时任务执行线程，优先复用 TM 现有 I/O executor。HTTP 客户端断开不会取消已经受理的采集。
 
-1. 检查 worker 实例、依赖准备、attach 开关和会话名额；已知启动窗口或 cProfile 冲突应拒绝。
-2. 生成唯一临时录制路径，以固定 argv 启动配置的 Memray CLI。
-   在支持版本中验证目标侧 `--duration` 兜底计时；建议设为请求时长加少量清理宽限，
-   使正常 TM 控制的 detach 先于兜底发生。
-3. 在 profiling executor 等待请求窗口，然后执行 detach；失败/取消分支也负责这一清理尝试。
-   限制 CLI 等待并回收工具/debugger 子进程，不以杀死业务 worker 作为 profiler 降级方案。
-4. 在已声明的独占控制前提下，以成功 detach 作为正常关闭确认，再校验和发布录制文件，标记 `FINISHED`。
-5. 无法确认停止时，标记 `FAILED` 并明确提示“停止未确认”；不报告成功、不删除可能仍有 writer 的文件，
-   也不自动重新 attach。清理仍无法确认停止时，保留活动会话名额，直到原 worker 退出。
-   因名额作用域为 JVM，此期间该 JVM 的 JVM、Python CPU 和内存 REST 采集请求均返回忙状态。
-   首版没有强制解锁接口；如需提前恢复诊断能力，由用户评估业务影响后通过正常的作业停止/重启流程
-   让原 worker 退出，Flink profiler 不主动终止业务 worker。TM 关闭只做有界诊断等待，
-   worker 终止仍由既有任务/Beam 生命周期负责。
+`ProfilingService` 分别维护 JVM 和 Python 两个活动名额，状态查询、结果发布和下载仍复用同一服务。Python CPU 和两种内存入口共用一个 Python 名额，不同 worker 串行采集；多个 TM 共用一个 JVM 时也共享该 Python 名额。Python 名额已占用时拒绝新的 Python 按需请求，不增加队列、重试或多级并发配置。JVM 活动采集及其停止调度与 Python 独立，避免 Python 采集故障阻断 JVM 诊断。
 
-目标侧计时是 TM 消失后的兜底，不是完成证据或硬上限。
-Memray 1.20.0 在 Tracker 关闭完成之前就清空 “last tracker” 引用，
-因此 detach 的“没有先前 attach”错误不能单独解释为成功。
-Ray 在 detach 失败后返回 warning 并继续渲染的行为，不足以满足 Flink 的 `FINISHED` 约定。
-结束 CLI 子进程也不等于目标内跟踪已经停止；这些路径必须在支持版本上实际验证后再合并。
-[Memray 生命周期实现][memray-code]
+API 集成由 worker 自行触发，在延迟结束、启动 Tracker 前取得 Python 名额。`ProfilingService` 为同一 JVM 的 Python 名额创建一个共享锁文件，并通过既有环境准备链路把路径传给 worker；Java 使用 `FileChannel.tryLock`，Python 使用 POSIX `fcntl.lockf` 的非阻塞排他锁。两者必须访问同一个本地锁文件，取得锁的一方持有到采集已确认停止。该文件锁只约束 Python 采集，不再用于 JVM profiler，也不由结果目录配置 `rest.profiling.dir` 控制。原型将锁文件放在 `java.io.tmpdir` 下，部署时需保证该目录为 TM 和 worker 共同可访问的本地挂载。
 
-HTTP 客户端断开不取消已经受理的 Flink 异步会话。不增加通用重试，不复制 Ray 的 sudo/setuid 降级。
-采集窗口内 Memray 控制权必须独占；CLI 无法辨别另一个手工 attach 是否属于不同会话。
+worker 在开始前发布 `RUNNING`，关闭 Tracker 并发布完整文件后写入 `FINISHED` 和 `stop_confirmed=true`，失败时发布 `FAILED` 及原因。忙时跳过或准备失败通过同一状态文件发布。TM 在现有状态查询和接纳请求时读取这些记录，按进程实例更新同一个会话，而不把轮询读到的状态重复加入历史；已接纳的终态记录可被消费，结果文件仍按保留规则管理。环境变量只传配置和路径，状态回传使用原子发布的 JSON 文件，不通过环境变量或 Beam Fn API 发送控制命令。
 
-### Tool compatibility and interpretation
+worker 被 SIGKILL 时内核释放其持有的文件锁；TM 下次检查时将该进程遗留的运行中会话标为失败，并回收已确认没有 writer 的自有临时文件。worker 仍存活且 Tracker 停止未确认时，不能仅凭会话已标为 `FAILED` 就释放 Python 名额。
 
-发布经过验证的 Flink、CPython、工具版本、Linux 架构和 native 模式矩阵。
-Flink 维护者负责这些组合上的调用/API、停止、失败与产物约定；部署方负责安装和权限。
-工具升级必须重新运行可重复的真实工具 smoke 和生命周期测试；验收需要检查采集完成、停止确认和产物，
-不能仅检查作业退出状态。不需要版本适配框架。
+### 执行 CPU 采集（进程外）
 
-Ray 将 py-spy 放在 `ray[default]`、Memray 放在 `ray[observability]`，节点 manager 检查工具可用性。
-借鉴可选依赖准备，不把 Agent PATH 中有命令当成目标解释器能导入 Memray。
-记录实际版本，并要求 Memray CLI 与 worker 包采用已验证组合。[Ray 依赖][ray-dependencies]
+TM 中新增的 `PythonWorkerProfiler` 负责启动和管理 py-spy 子进程。它使用部署配置中的工具路径和固定参数调用 `record`，采样率为 50 Hz；按请求映射 `--native` 和 `--idle`，输出路径由 TM 生成。py-spy 从进程外采样目标 worker，结果处理继续交给 `ProfilingService`。
 
-CPU 图的宽度是栈样本比例，不是精确 CPU 时间；native 模式可能看不到没有 Python 线程状态的原生线程池，
-也不采集 GPU kernel。内存文件描述窗口内的分配，不解释全部 RSS/PSS、容器内存或 GPU 显存，
-也不能回溯归因采集开始之前的分配。native 开关增加 C/C++ 栈，关闭时仍可能记录原生分配。
-窗口结束仍未释放的记录不自动等同于泄漏。
+首版固定 50 Hz，用于收敛公共接口并统一真实工具验证的基准，暂不开放采样率配置。这是初始工程取舍，不代表该频率对所有负载都有固定低开销；其吞吐和尾延迟影响需要按 Test Plan 重新测量后报告。
 
-沿用部署已有 REST 访问约束，保护可能含源码路径的产物。本提案不建立互不信任作业间的新隔离机制。
+采集从工具启动开始按实际经过时间计时。到期向 py-spy 发送 SIGINT，请求结束采样并生成 SVG， 再允许有界的收尾时间，当前 POC 为 10 秒。初始化会占用窗口，实际采样时长可能短于请求值。 保留工具自身的 duration 作为额外退出条件：已验证的 py-spy 0.4.3 按采样轮数结束，慢 native 展开可能超过名义时长，因此不能只依赖工具自身计时。只有工具正常退出、生成有效文件，并提供已验证的正样本完成信息后，才进入成功发布流程。例如 `Samples: N` 是对特定已验证版本输出的依赖，不是通用协议。无效或零样本采集标记为失败；强杀工具也不作为成功完成的证据。
 
-## Compatibility, Deprecation, and Migration Plan
+### 执行内存采集（进程内）
 
-所有新增方式均显式启用。保留 JVM 请求/响应、默认 JVM 历史、文件路由和 `python.profile.enabled` 行为；
-该配置继续指现有 cProfile，不重命名或静默替换。同一 worker 不支持 cProfile 与 Memray 同时采集。
+两种内存入口最终都在 Python worker 内运行 Memray Tracker，并使用相同的分配语义和 `.bin` 格式。 依赖和配置复用既有 Python 环境、archives、requirements 及配置传递链路；TM 将生效的绝对结果目录传给 worker，避免虚拟环境或工作目录改变路径含义。内存功能关闭时不导入 Memray。
 
-本稿新增 Python 接口和配置在发布后形成公共约定。内部环境变量仅用于 TM 与 worker 之间传递配置，
-不作为用户配置入口。尚未发布的原型不建立兼容别名；用户使用本稿列出的配置和 REST 请求。
+#### API 集成
 
-同一 FLIP 下可以分 CPU、启动内存、attach 内存三个实现变更评审，内存仍在正式范围。
-Attach 合并要求落实风险提示、默认关闭和真实生命周期证据。
-既有 worker 需重启以应用依赖准备和启动配置；不改变 checkpoint/savepoint 格式或 UDF 签名。
+worker 启动入口根据作业配置安排一个录制窗口。延迟结束并取得共享名额后，由 worker 内的后台线程进入`Tracker` context，维持配置的时长，再退出 context。采集线程与 Beam harness 在同一个Python 进程中，无需在 UDF 或 bundle 热路径添加诊断代码，录完后 worker 继续处理数据。启动入口负责记录生效参数、工具版本、PID、实际起止时间和文件名。`Tracker.__exit__` 完成意味着跟踪已关闭且文件已经收尾；随后交回结果和完成状态，再释放共享名额。每次 worker 重启重新安排一个窗口，生成新文件，不续写前一次录制。
 
-## Test Plan
+#### 动态 attach
 
-以下是相关实现合并及发布前的验收要求；原型已完成的验证和限制见附录 A。
+`flink-runtime` 中新增的 `PythonWorkerMemoryProfiler` 负责外部 Memray CLI 的启停。 它借鉴 Ray Reporter Agent 的 attach → 等待 → detach 流程，保留 Flink 的异步会话管理，直接交付原始录制文件。CLI 负责把采集逻辑接入目标进程，实际分配跟踪和文件写入发生在 worker 内。取得共享名额后，TM 为本次采集生成唯一临时路径，以固定参数执行 `memray attach`。到达请求窗口后调用 `memray detach`，以成功 detach 作为正常关闭确认，再校验文件并进入结果发布流程。
+
+还需要在支持的 Memray 版本上验证目标侧 `--duration` 作为 TM 消失后的兜底计时，采用请求时长加少量收尾余量，让正常 detach 先于兜底触发。该计时不构成硬停止期限或成功完成证据。 Beam 2.75 Fn API 没有 Memray 启停指令，其 bundle profiler factory 也不提供这里需要的进程级采集窗口。同一 worker 只能有一个 Memray Tracker，也不能同时运行 Memray 和 cProfile。 Flink 控制内存采集期间，管理员不得另外启动手工 Memray 会话；CLI 无法辨认另一个手工 attach 是否属于不同会话。
+
+### 发布结果与提供下载
+
+采集实现负责确认工具或 Tracker 已停止、文件已关闭；`ProfilingService` 随后发布结果文件名并更新为 `FINISHED`。CPU 使用 `python-<uuid>.svg`，动态 attach 使用 `python-memory-<uuid>.bin`，API 录制使用 `python-memory-startup-<pid>-<uuid>.bin`。Memray 录制先写 `.bin.inprogress`，关闭后再发布完整 `.bin`。有效的零分配内存窗口可以成功完成，不沿用 CPU 的零样本失败规则。
+
+结果先按 worker 进程实例和 CPU/内存类型保留最新成功文件，API 和 attach 共用内存结果，失败不替换上一次成功结果；再应用 TM 级 `rest.profiling.history-size` 上限，对不同 worker 和重启产生的旧实例统一淘汰。只清理本功能拥有、已确认停止写入的文件；停止未确认的占用和未完成文件不按普通历史淘汰。保留上限不改变 BLOB 自身的缓存生命周期，也不撤销用户已下载的副本。
+
+下载复用既有 `FileType.PROFILER`、TM 文件上传和 transient BLOB 链路，将 TM 结果目录中的完整文件返回客户端。录制中的文件不提供下载。Python 产物按附件下载并设置 `nosniff`；SVG 额外设置受限 CSP，`.bin` 使用 `application/octet-stream`。本地旧结果的替换不会撤销 BLOB 缓存或用户已经下载的副本。Memray 的 HTML、stats 和 tree 由用户离线生成。Flink 首版只提供录制文件，不在 worker 中启动报告渲染进程。原有 JVM 下载行为保持不变。产物访问沿用部署已有的 REST 权限约束，保护可能包含源码路径的文件；本提案不建立互不信任作业间的新隔离机制。
+
+### 退出、失败与清理
+
+**Worker 退出。** Beam/task 生命周期继续负责关闭业务进程。harness 正常返回或抛出 Python 异常时，API 启动入口取消尚未开始的窗口，或让当前 Tracker 关闭一次；正常退出同时删除该 worker 的进程登记。Java 算子关闭时从 TM 内存表删除自己的关联。异常退出释放内核文件锁，TM 依据进程启动身份确认原 worker 已退出后，更新遗留会话并回收未完成的自有临时文件；已发布结果继续受 TM 级保留上限管理，不随 worker 退出立即删除。
+
+**采集失败或取消。** 对工具、权限、存储和 worker 退出等错误记录失败状态与清理结果。CPU 采集到期收尾后仍不退出时，终止/强杀采样器并标记失败。内存采集在失败或取消时也尝试detach，对 CLI 等待设置上限并回收工具/debugger 子进程。
+
+**内存停止未确认。** 若清理后仍无法确认 Tracker 已关闭，标记 `FAILED` 并保留未完成文件，不发布成功、不删除或截断可能仍有 writer 的文件，也不自动重新 attach。Python 名额保留到原 worker 退出；期间其他 Python 按需请求返回忙状态，API 窗口跳过并记录原因，JVM profiling 不受这一占用影响。首版没有把“强制解锁”当作停止确认的接口；用户可在评估业务影响后通过常规作业停止/重启流程让原 worker 退出。Memray 1.20.0 在关闭完成前就清空 “last tracker” 引用，因此 detach 的“没有先前 attach”错误不等于关闭成功。
+
+**TM 关闭。** 取消本 TM 所属的采集并做有界等待，避免关闭仍被同 JVM 其他 TM 使用的 profiling service。关闭开始后不再接纳迟到查询触发的新采集；worker 的最终终止仍由已有 task/Beam 生命周期负责。OOM/SIGKILL 等异常终止可能留下未完成录制，不能保证完整产物。登记清理复用已有发现扫描。正常退出未能清理的记录，在确认原进程失效后由 TM 回收；保留存活记录和未知文件，读取或检查失败不视为进程已死，清理失败记录日志并继续返回其他有效 worker。TM 异常退出不保证立即清理，重新初始化其私有临时目录时清除残留，不新增心跳或清理服务。TM 关闭同时清空算子关联内存表，不再存在算子关联文件的发布和回收流程。
+
+### 能力边界
+
+**本地文件系统。** 共享锁文件及 TM 私有登记/状态目录使用支持所需文件锁和原子发布语义的本地文件系统，TM 与 worker 必须访问同一个锁文件。首版不支持将这些内部协调文件放在 NFS 等网络文件系统上。`rest.profiling.dir` 只指定采集产物目录，与锁文件路径分开；其配置仍遵循前述 TM 本地结果目录约定，不能把两者当成同一个配置约束。[Java FileLock 的平台与网络文件系统限制](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/nio/channels/FileLock.html)
+
+py-spy 和 Memray 由部署方预装在运行环境中，例如 TM 和 Python worker 的容器镜像。Flink 不打包、安装或升级这两个工具。py-spy 必须可被 TM 执行；Memray 必须能被 worker 实际使用的 Python 解释器导入。当前验证的 Memray 1.20.0 动态 attach 还要求 TM 能执行 Memray CLI，并在运行环境中提供 GDB 或 LLDB。[Memray attach 前提与风险](https://github.com/bloomberg/memray/blob/v1.20.0/docs/attach.rst)
+
+**部署权限。** py-spy 是由 TM 启动的工具进程，通常不是 worker 的祖先进程，因此同一用户、同一 Pod 或同一 PID namespace 并不自动满足采集权限。Linux Yama `ptrace_scope=1` 下通常需要 `CAP_SYS_PTRACE` 或明确允许的 ptracer 关系，并需验证容器 seccomp/LSM 等安全策略。Memray 动态 attach 同样需要调试器访问权限；Memray API 集成不需要外部 ptrace 权限。Flink 不自动修改这些权限，部署文档需提供经过验证的 TM 容器配置示例。[Linux Yama 规则](https://docs.kernel.org/admin-guide/LSM/Yama.html)
+
+**CPU 覆盖范围。** py-spy 采集 Python 线程的调用栈；`includeNative=true` 在支持的平台上补充这些线程中的原生调用栈，不保证采集没有 Python 线程状态的原生工作线程。因此，PyTorch/libtorch intra-op 线程池可能存在活跃线程未进入火焰图，不能仅凭图中样本分布解释进程的全部 CPU 消耗。POC 的默认六线程池中已有五个活跃原生线程未进入 SVG 的观察。该能力有助于定位 Python 处理路径及部分原生调用，但不是 PyTorch 原生计算的完整线程分析器。[py-spy 0.4.3 实现](https://github.com/benfred/py-spy/blob/v0.4.3/src/python_spy.rs)
+
+**内存解释与风险。** Memray 只跟踪采集开始后发生的分配及相应释放；它不能追溯采集前已经分配的模型或缓冲区。采集窗口结束时仍存活的分配不直接等于泄漏，原始录制也不等于进程 RSS 或 GPU 显存分析。动态 attach 可能使 worker 崩溃或死锁，API 集成则避免外部代码注入，但仍存在工具开销和进程内采集故障风险；两者都需要受控窗口和部署存储约束。
+
+**工具维护。** 发布支持以经过真实验证的平台、CPython、py-spy 和 Memray 版本组合为准，在用户文档中列出；Flink 维护工具参数、退出语义和产物格式的接入验证。保留一条可重复的真实工具回归路径，验证参数、正常退出、有效样本、Memray 文件可读性和故障收尾；升级工具后重新验证。`Samples: N` 等文本输出属于已验证版本的集成约定，退出码为 0 或 SVG 非空不能替代有效样本检查。首版不增加版本适配框架或通用 profiler SPI。
+
+## Compatibility, Deprecation, and Migration Plan
+
+所有新增方式均显式启用。保留 JVM 请求/响应、默认 JVM 历史、文件路由和 `python.profile.enabled` 行为；该配置继续指现有 cProfile，不重命名或静默替换。同一 worker 不支持 cProfile 与 Memray 同时采集。
+
+## Test Plan
+
+以下是相关实现合并及发布前的验收要求；原型已完成的验证和限制见附录 A。
 
 | 范围 | 必需证据 |
 | --- | --- |
-| 协议/兼容 | 原 JVM 客户端和生成 REST schema；Python CPU/Memory 区分；非法组合；400/404/409/503；下载 MIME/headers。 |
-| 身份/生命周期 | 多 worker/TM、PID 复用、SIGKILL 登记回收、保留存活/未知文件；关联发布失败时清理临时文件并保留无关文件；TM 退出、排队采集与迟到查询。 |
-| 启动 API | 关闭时不依赖 Memray；缺包、延迟、正常/异常退出、只关闭一次、重启、继续处理；archives 或禁止继承环境变量时目录仍正确。 |
-| Attach | 真实成功、权限与缺包；注入/detach 失败；兜底计时竞态；CLI/TM 中断；兜底计时尚未结束时 worker 正常退出；停止不明；不主动杀业务 worker、不误报完成。 |
-| 所有权 | 启动等待/采集与 attach 冲突；重复请求；JVM 级 REST 名额；明确并验证 Memray 独占控制前提。 |
-| 产物 | 真实 SVG 和已关闭可读的 Memray binary；零分配、未完成文件、不可写/空间不足；REST 保留策略与显式启动文件保留策略。 |
-| 代表负载 | 预热后的 CPU PyTorch 推理，覆盖单线程及默认原生线程池；对比不采集、CPU 采集、内存采集的吞吐和尾延迟，列明可见/遗漏栈。 |
-| 操作流程 | 单 TM、两个未融合算子、关闭 Python managed memory；按算子/subtask/attempt 选择，核对独立 PID 和热点。开启 managed memory 作为共享 worker 对照，验证两个关联和关闭清理；验证 attach 提示与下载。 |
+| 协议/兼容 | 原 JVM 客户端和生成 REST schema；Python CPU/Memory 区分；非法组合；400/404/409/503；下载 MIME/headers。 |
+| 身份/生命周期 | 多 worker/TM、PID 复用、SIGKILL 登记回收、保留存活/未知文件；进程和状态 JSON 的原子发布、损坏记录和重复读取；算子内存关联在正常关闭、失败和 TM 退出时清理；后台采集与迟到查询。 |
+| 启动 API | 关闭时不依赖 Memray；缺包、目标 TM 的总开关和时长上限、延迟、正常/异常退出、只关闭一次、重启、继续处理；多个 worker 同时启动时忙窗口可查询为失败且原因明确；archives 或禁止继承环境变量时目录和锁路径仍正确。 |
+| Attach | 真实成功、权限与缺包；注入/detach 失败；兜底计时竞态；CLI/TM 中断；兜底计时尚未结束时 worker 正常退出；停止不明；不主动杀业务 worker、不误报完成。 |
+| 所有权 | JVM 与 Python 名额互不占用，Python 工具阻塞不延迟 JVM 停止；同一 Flink JVM 的 Python CPU/API/attach、不同 worker 均互斥；独立 JVM 的 TM 可各自采集；API 延迟不占名额、忙时跳过；停止未确认保留 Python 名额但 JVM profiling 仍可执行；SIGKILL 后释放；Memray 独占控制。 |
+| 产物 | 真实 SVG 和已关闭可读的 Memray binary；零样本 CPU 失败、有效零分配内存窗口成功；未完成文件、不可写/空间不足；每 worker 每类最新成功结果与 TM 总上限共同生效，API/attach 共用内存结果；反复 failover、worker 退出后保留结果、跨旧实例淘汰及文件清理；Python/JVM 历史独立计数，不删除活动 writer 的文件。 |
+| 代表负载 | 在 CPU 计时停止修复后的版本重测预热 CPU PyTorch 推理，覆盖单线程及默认原生线程池；重复对比不采集、50 Hz py-spy、Memray 普通/native 模式，报告吞吐、UDF 尾延迟、实际窗口、RSS 和产物大小，列明可见/遗漏栈；不以修复前矩阵代替当前版本开销证据。 |
+| 操作流程 | 单 TM、两个未融合算子、关闭 Python managed memory；按算子/subtask/attempt 选择，核对独立 PID 和热点。开启 managed memory 作为共享 worker 对照，验证两个关联和关闭清理；验证 attach 提示与下载。 |
 
-Native Memray 文件可能很大，需验证增长、开销和停止能力。
-文件大小监控可以请求停止，但无法在不影响 worker 的前提下为失去响应的进程内 Tracker 强制施加硬文件上限。
-部署存储约束及此限制必须写入说明；初始支持矩阵从适度窗口和小规模诊断负载取得证据。
+部署验证需覆盖非特权默认容器下的失败提示，以及配置所需权限后的真实采集；确认 Memray API 不依赖 attach 权限。验证 TM 与 worker 访问同一个本地锁文件，结果目录变更不改变锁路径，并覆盖启动窗口与按需请求双向冲突时的非抢占行为。真实工具回归应可重复执行，工具升级或停止路径变更后重新验证代表性负载，不能只依赖模拟 CLI 测试。
 
-## Rejected Alternatives
+Native Memray 文件可能很大，需验证增长、开销和停止能力。 文件大小监控可以请求停止，但无法在不影响 worker 的前提下为失去响应的进程内 Tracker 强制施加硬文件上限。 部署存储约束及此限制必须写入说明；初始支持矩阵从适度窗口和小规模诊断负载取得证据。
 
-| Alternative | Reason |
-| --- | --- |
-| 仅因 Memray 是外部可选依赖而排除内存 | 可选准备是合理部署约定；Flink 仍维护接入和兼容性。 |
-| 首版新增协作式 worker 命令 socket/RPC | 启动 API 与明确风险的 attach 已覆盖选定的两种方式，无需另一套控制协议。 |
-| 把 Beam bundle/status/metrics 消息改作 profiler 命令 | 没有匹配操作，复用不相符语义会形成协议维护负担。 |
-| 独立 REST 服务、历史、产物库、调度器或 profiler SPI | 既有 Flink profiling 链路已能承担按需请求的这些责任。 |
-| 把 attach 进程退出或 binary 可读当成完成 | 目标内可能仍在录制，必须确认停止。 |
-| 首版自动渲染所有内存报告或暴露全部 Memray 参数 | 先保留一种原生 binary，利用 Memray 既有离线工具。 |
-| 为启动窗口增加集中调度和实时 REST 历史 | 需要额外上报/准入协调；首版明确使用日志/文件定位及部署侧保留策略。 |
+## Rejected Alternatives
 
-## Appendix A: Prototype validation
+### 为 Python profiling 新增独立 REST 路径
 
-以下本地实验说明接入可行性，不代表社区批准、发布支持矩阵或生产开销保证。原型使用 Linux AArch64、
-CPython 3.11.18、Beam 2.75.0、py-spy 0.4.3 和 Memray 1.20.0。
+独立的 `/taskmanagers/:tm/python-workers/:workerId/profiler` 路径能够直接表达 worker 资源，也可以复用同一后台实现。首版选择扩展现有 TM Profiler 接口，因为 JVM 和 Python 采集沿用相同的会话状态与文件下载流程，固定 schema 中的可选字段及合法组合校验已能表达两类请求，并保留原有 JVM 请求和默认查询行为。因此暂不新增一组 Python 专用会话路由。
+
+### 直接复用 Beam 的 Memray 集成
+
+Beam 2.75 已提供 Memray 集成，但该实现位于 Beam Python 容器的 Go 启动器中。PyFlink 的进程执行模式使用自身的启动脚本和 `beam_boot.py`，不能仅通过设置 Beam 的 profiling 选项启用这套能力。
+
+此外，Beam 的限时采集通过向 worker 发送 SIGINT 结束录制，并在 worker 退出后以不带 profiler 的方式重新启动。这与本提案“结束采集后，由同一个 worker 继续处理数据”的目标不一致。直接复用需要调整启动入口和停止行为，并补充与 Flink 会话管理、状态查询和结果下载的集成。[Beam 实现](https://github.com/apache/beam/blob/v2.75.0/sdks/python/container/boot.go#L326-L375)
+
+因此，本提案借鉴其在 worker 启动入口接入分析工具的思路，通过 Memray 公共 `Tracker` API 管理采集窗口，并复用 Flink 已有的 profiling 链路。
+
+### 由 Java 直接取得 SDK harness PID
+
+如果现有进程管理能够直接提供真实 SDK harness PID，可以减少 Python 进程登记。但当前 Beam 2.75.0 的 `ProcessManager.RunningProcess` 未公开底层进程或 PID，`FnApiControlClient.getWorkerId()` 提供的是 Beam worker ID；启动的 shell/解释器包装器 PID 也未必等于最终 harness PID。[Beam 进程管理实现](https://github.com/apache/beam/blob/v2.75.0/runners/java-fn-execution/src/main/java/org/apache/beam/runners/fnexecution/environment/ProcessManager.java)
+
+为此复制或替换 Beam 进程管理、反射访问内部 Process，或新增进程控制通道，都会扩大本提案范围。因此首版只由 Python 发布少量进程身份和 API 采集状态，Java 算子关联保存在 TM 内存中，继续复用既有 Beam 进程生命周期。以后若上游提供可直接复用的真实 PID 接口，可以再替换这部分内部登记。
+
+### 使用 Scalene 作为 CPU 和内存分析工具
+
+Scalene 提供 CPU、内存及原生代码分析能力，但其接入方式与本提案选定的诊断流程存在差异。CPU 方面，Scalene 的运行期启停控制要求目标程序已经通过 Scalene 启动；其 `--pid` 选项用于控制已接入 Scalene 的进程。本提案选择 py-spy，以便对未预先接入 CPU profiler 的运行中 worker 进行进程外采样。[Scalene 使用说明](https://github.com/plasma-umass/scalene#usage)
+
+内存方面，我们核对的 Scalene Linux/macOS 实现需要在 Python 启动时预加载原生库，并接入其采样和信号处理机制。Memray 可以在进程内通过公共 `Tracker` API 开始和结束采集，无需通过预加载环境变量启动 Python；同一工具还提供本提案选择的可选动态 attach 入口。[Scalene 预加载实现](https://github.com/plasma-umass/scalene/blob/master/scalene/scalene_preload.py) · [Memray API](https://bloomberg.github.io/memray/api.html)
+
+本提案的内存诊断重点是保存采集窗口内被跟踪的分配、释放及相关调用栈，再离线分析峰值占用和窗口结束时仍存活的分配。Memray 的原始录制文件和离线报告流程直接对应这一目标，因此首版选择 Memray。[Memray 文档](https://bloomberg.github.io/memray/overview.html)
+
+## Appendix A: Prototype validation
+
+以下本地实验说明接入可行性，不代表社区批准、发布支持矩阵或生产开销保证。原型使用 Linux AArch64、 CPython 3.11.18、Beam 2.75.0、py-spy 0.4.3 和 Memray 1.20.0。
+
+2026-11-09 的本地对齐已将 worker 发现字段统一为 `memoryAttachAvailable`，将 Java 算子关联改为 TM 共享内存表，并补齐 API 采集的文件锁准入、JSON 状态交回、查询与每 worker 每类最新成功结果保留。以上仅描述已有实现，不表示本次修订中的所有要求已经完成。
+
+当前 POC 的 JVM、Python REST 和 API 采集仍共用原来的 JVM 级名额。真实 Java/Python 进程实验已验证双向互斥、第二个 worker 忙时跳过、Tracker 关闭后释放名额，以及真实 Memray 录制可由 FileReader 读取；Linux AArch64 容器还验证了文件锁互操作和进程退出释放。该轮机制验证不等同于完整 Flink standalone 或 PyTorch 开销实验。
+
+本次修订新增的 JVM/Python 名额隔离、Python 阻塞任务与 JVM 停止定时器隔离、跳过/准备失败的可查询状态、TM 级跨 worker 结果总上限，以及确认进程退出后的未完成文件回收，仍需按 Test Plan 实现并验证。下述既有实验不能作为这些新要求的验收证据。
 
 | 场景 | 已观察到的结果 |
 | --- | --- |
-| 单 TM、单 slot、两个未融合 Python 算子 | 关闭 Python managed memory 时产生两个 worker，算子/subtask/attempt 与 UDF 自报 PID 一致；分别采集的 CPU 图区分各自热点，Memray 记录了指定 PID 的分配栈。开启 managed memory 后，一个 worker 列出两个算子，CPU 图包含双方热点。 |
-| 两个 TM、CPU ResNet-18 推理 | 两个 worker 可独立采集，跨 TM 句柄隔离、同 JVM 冲突及下载结果得到验证；单线程与默认六线程原生池各完成三轮吞吐和 UDF 延迟对照。默认池中五个活跃原生线程未进入 py-spy SVG。 |
-| 采集完成与生命周期 | 普通/native CPU、启动 Tracker 和 native Memray attach 均产生可读产物，下载与本地文件一致，作业继续运行；取消后关联记录清理，旧句柄被拒绝。py-spy native 时长超限问题经计时 SIGINT 和有界收尾修复后，通过真实 REST 请求验证。 |
-| 协议与回归 | 已运行配置、worker 发现、REST/RPC、历史、下载、前端和 Python 生命周期的定向测试；登记发布失败的临时文件清理完成先失败、修复后通过的回归验证；生成的 REST/config 文档和兼容性检查通过。 |
+| 单 TM、单 slot、两个未融合 Python 算子 | 关闭 Python managed memory 时产生两个 worker，算子/subtask/attempt 与 UDF 自报 PID 一致；分别采集的 CPU 图区分各自热点，Memray 记录了指定 PID 的分配栈。开启 managed memory 后，一个 worker 列出两个算子，CPU 图包含双方热点。 |
+| 两个 TM、CPU ResNet-18 推理 | 两个 worker 可独立采集，跨 TM 句柄隔离及下载结果得到验证；同 JVM 冲突测试验证的是原型当时的全局互斥规则。单线程与默认六线程原生池各完成三轮吞吐和 UDF 延迟对照，默认池中五个活跃原生线程未进入 py-spy SVG。 |
+| 采集完成与生命周期 | 普通/native CPU、启动 Tracker 和 native Memray attach 均产生可读产物，下载与本地文件一致，作业继续运行；取消后关联记录清理，旧句柄被拒绝。py-spy native 时长超限问题经计时 SIGINT 和有界收尾修复后，通过真实 REST 请求验证。 |
+| 协议与回归 | 已运行配置、worker 发现、REST/RPC、历史、下载、前端和 Python 生命周期的定向测试；后续已覆盖 API 状态交回、重复读取、不同 worker 结果隔离、文件锁互斥及算子内存关联清理。已有生成 REST/config 文档和兼容性检查通过；不代表新增名额隔离和总量上限已经实现或通过检查。 |
 
-开销对照来自本地 VM 的短窗口实验，且完整三轮矩阵采自 CPU 停止修复之前；修复后仅重新验证了
-native 采集完成，没有重复完整开销矩阵。因此不据此承诺固定的生产开销或完整原生 CPU 覆盖。
+开销对照来自本地 VM 的短窗口实验，且完整三轮矩阵采自 CPU 停止修复之前；修复后仅重新验证了 native 采集完成，没有重复完整开销矩阵。因此不据此承诺固定的生产开销或完整原生 CPU 覆盖。
 
-合并前仍需完成相关的故障与部署组合验证，发布支持更多版本或平台前需要扩展真实工具矩阵。
-更完整的 native 崩溃/死锁、权限/debugger 故障、archives 和磁盘容量实验，以及全仓库 `clean verify`
-仍待完成。复现脚本、原始数据和截图单独保存在实现验证记录中，社区讨论时应提供可访问的证据附件。
+合并前仍需完成本次修订的实现对齐、修复后代表性开销重测，以及相关故障与部署组合验证。发布支持更多版本或平台前需要扩展真实工具矩阵。更完整的 native 崩溃/死锁、权限/debugger 故障、archives 和磁盘容量实验，以及全仓库 `clean verify` 仍待完成。复现脚本、原始数据和截图单独保存在实现验证记录中，社区讨论时应提供可访问的证据附件。
+
+CPU 火焰图、Memray API 集成验证结果，以及动态 attach 的 HTML、stats 和 tree 报告见 Goals and non-goals 中对应的 CPU 和内存分析部分。
 
 ## References
 
-- [现有 JVM profiler：FLIP-375][flip-375]。
-- [Memray Tracker API][memray-api] 与 [attach 风险说明][memray-attach]。
-- [Ray 的 profiling 接入实现][ray-manager]。
-- [FLIP 流程和公共接口约定][flip-process]。
+*   [现有 JVM profiler：FLIP-375](https://cwiki.apache.org/confluence/spaces/FLINK/pages/272927211/FLIP-375%2BBuilt-in%2Bcross-platform%2Bpowerful%2Bjava%2Bprofiler)。
 
-[flip-template]: https://cwiki.apache.org/confluence/spaces/FLINK/pages/65145553/FLIP+Template
-[flip-process]: https://cwiki.apache.org/confluence/spaces/FLINK/pages/65145551/Flink+Improvement+Proposals
-[flip-375]: https://cwiki.apache.org/confluence/spaces/FLINK/pages/272927211/FLIP-375%2BBuilt-in%2Bcross-platform%2Bpowerful%2Bjava%2Bprofiler
-[memray-api]: https://bloomberg.github.io/memray/api.html
-[memray-native]: https://bloomberg.github.io/memray/native_mode.html
-[memray-attach]: https://github.com/bloomberg/memray/blob/v1.20.0/docs/attach.rst
-[memray-code]: https://github.com/bloomberg/memray/blob/v1.20.0/src/memray/commands/attach.py
-[ray-agent]: https://github.com/ray-project/ray/blob/ad7245ffb7d4c289e0d14cb2fd8c02af3c09433d/python/ray/dashboard/modules/reporter/reporter_agent.py#L641-L664
-[ray-manager]: https://github.com/ray-project/ray/blob/ad7245ffb7d4c289e0d14cb2fd8c02af3c09433d/python/ray/dashboard/modules/reporter/profile_manager.py
-[ray-dependencies]: https://github.com/ray-project/ray/blob/ad7245ffb7d4c289e0d14cb2fd8c02af3c09433d/python/setup.py#L258-L279
-[beam-fn-api]: https://github.com/apache/beam/blob/v2.75.0/model/fn-execution/src/main/proto/org/apache/beam/model/fn_execution/v1/beam_fn_api.proto#L152-L169
-[pytorch-profiling]: https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html
+*   Memray Tracker API。
+
+*   [Ray 的 profiling 接入实现](https://github.com/ray-project/ray/blob/ad7245ffb7d4c289e0d14cb2fd8c02af3c09433d/python/ray/dashboard/modules/reporter/profile_manager.py)。
+
+*   [PyFlink 性能指标相关工作：FLINK-39153](https://issues.apache.org/jira/browse/FLINK-39153)。
+
+*   [Memray 1.20.0 attach 前提与风险](https://github.com/bloomberg/memray/blob/v1.20.0/docs/attach.rst)。
+
+*   [Linux Yama ptrace 权限](https://docs.kernel.org/admin-guide/LSM/Yama.html)。
+
+*   [py-spy 0.4.3 调用栈采集实现](https://github.com/benfred/py-spy/blob/v0.4.3/src/python_spy.rs)。
+
+*   [FLIP 流程和公共接口约定](https://cwiki.apache.org/confluence/spaces/FLINK/pages/65145551/Flink+Improvement+Proposals)。
+
+*   [https://github.com/plasma-umass/scalene](https://github.com/plasma-umass/scalene)

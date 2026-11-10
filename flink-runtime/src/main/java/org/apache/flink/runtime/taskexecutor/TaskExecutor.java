@@ -23,6 +23,7 @@ import org.apache.flink.api.common.ApplicationID;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.BatchExecutionOptions;
 import org.apache.flink.configuration.ClusterOptions;
+import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.configuration.ThreadDumpMode;
@@ -175,6 +176,9 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -402,7 +406,9 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
         this.profilingService =
                 ProfilingService.getInstance(taskManagerConfiguration.getConfiguration());
         this.pythonWorkerRegistry =
-                new PythonWorkerRegistry(taskManagerConfiguration.getTmpWorkingDirectory());
+                PythonWorkerRegistry.getOrCreate(
+                        taskExecutorServices.getSharedResources(),
+                        taskManagerConfiguration.getTmpWorkingDirectory());
         log.info(
                 "Python worker profiling enabled: {}, executable: {}, result directory: {}, sampling rate: 50 Hz",
                 isPythonProfilingEnabled(),
@@ -616,6 +622,13 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
         try {
             threadInfoSampleService.close();
+        } catch (Exception e) {
+            exception = ExceptionUtils.firstOrSuppressed(e, exception);
+        }
+
+        try {
+            sharedResources.release(
+                    PythonWorkerRegistry.SHARED_RESOURCE, sharedResources, ignored -> {});
         } catch (Exception e) {
             exception = ExceptionUtils.firstOrSuppressed(e, exception);
         }
@@ -1583,18 +1596,37 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                     new UnsupportedOperationException(
                             "Python profiling requires a supported OS and rest.profiling.enabled"));
         }
-        if (request.getType() != ProfilingInfo.PythonProfilingType.MEMORY
-                && !taskManagerConfiguration
-                        .getConfiguration()
-                        .getOptional(RestOptions.PYTHON_CPU_PROFILING_EXECUTABLE)
-                        .isPresent()) {
-            return FutureUtils.completedExceptionally(
-                    new UnsupportedOperationException("py-spy is not configured"));
-        }
         return CompletableFuture.supplyAsync(
                         () -> {
                             try {
+                                final ConfigOption<String> toolOption =
+                                        request.getType()
+                                                        == ProfilingInfo.PythonProfilingType.MEMORY
+                                                ? RestOptions.PYTHON_MEMORY_PROFILING_EXECUTABLE
+                                                : RestOptions.PYTHON_CPU_PROFILING_EXECUTABLE;
+                                final String executable =
+                                        taskManagerConfiguration
+                                                .getConfiguration()
+                                                .getOptional(toolOption)
+                                                .orElseThrow(
+                                                        () ->
+                                                                new UnsupportedOperationException(
+                                                                        "The requested Python profiler is not configured"));
+                                final Path tool = Path.of(executable);
+                                if (!tool.isAbsolute()
+                                        || !Files.isRegularFile(tool)
+                                        || !Files.isExecutable(tool)) {
+                                    throw new UnsupportedOperationException(
+                                            "Python profiler is not an executable absolute path: "
+                                                    + executable);
+                                }
+                                profilingService.refreshStartupProfiling(
+                                        getResourceID().getResourceIdString(),
+                                        pythonWorkerRegistry);
                                 return pythonWorkerRegistry.getWorker(request.getWorkerId());
+                            } catch (InvalidPathException e) {
+                                throw new UnsupportedOperationException(
+                                        "Invalid Python profiler executable", e);
                             } catch (IOException e) {
                                 throw new CompletionException(e);
                             }
@@ -1611,10 +1643,6 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
                                 final Configuration config =
                                         taskManagerConfiguration.getConfiguration();
                                 if (!config.get(RestOptions.PYTHON_MEMORY_ATTACH_ENABLED)
-                                        || !config.getOptional(
-                                                        RestOptions
-                                                                .PYTHON_MEMORY_PROFILING_EXECUTABLE)
-                                                .isPresent()
                                         || !worker.isMemoryAvailable()) {
                                     return FutureUtils.completedExceptionally(
                                             new UnsupportedOperationException(
@@ -1674,7 +1702,21 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
     @Override
     public CompletableFuture<Collection<ProfilingInfo>> requestProfilingList(Duration timeout) {
-        return profilingService.getProfilingList(getResourceID().getResourceIdString());
+        return CompletableFuture.runAsync(
+                        () -> {
+                            try {
+                                profilingService.refreshStartupProfiling(
+                                        getResourceID().getResourceIdString(),
+                                        pythonWorkerRegistry);
+                            } catch (IOException e) {
+                                throw new CompletionException(e);
+                            }
+                        },
+                        ioExecutor)
+                .thenCompose(
+                        ignored ->
+                                profilingService.getProfilingList(
+                                        getResourceID().getResourceIdString()));
     }
 
     // ------------------------------------------------------------------------

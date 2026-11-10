@@ -109,6 +109,7 @@ public abstract class AbstractPythonEnvironmentManager implements PythonEnvironm
                             "BOOT_LOG_DIR",
                             "PYFLINK_WORKER_PROFILE_DIR",
                             "PYFLINK_WORKER_PROFILE_JOB_ID",
+                            "PYFLINK_PROFILING_LOCK_FILE",
                             "PYFLINK_MEMRAY_PREPARE",
                             "PYFLINK_MEMRAY_ATTACH",
                             "PYFLINK_MEMRAY_CPROFILE",

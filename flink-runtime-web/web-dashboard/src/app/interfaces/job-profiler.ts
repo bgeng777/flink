@@ -37,7 +37,7 @@ export interface ProfilingDetail {
 export interface PythonWorkerInfo {
   id: string;
   pid: number;
-  memoryProfilingAvailable: boolean;
+  memoryAttachAvailable: boolean;
   operators: PythonWorkerOperator[];
 }
 

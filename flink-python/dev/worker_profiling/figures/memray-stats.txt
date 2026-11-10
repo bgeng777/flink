@@ -1,0 +1,59 @@
+
+📏 Total allocations:
+	81920
+
+📦 Total memory allocated:
+	198.816MB
+
+📈 Peak memory usage:
+	2.625MB
+
+📊 Histogram of allocation size:
+	min: 1.000B
+	--------------------------------------------
+	< 3.000B   :  1152 ▇▇
+	< 12.000B  :     9 ▇
+	< 42.000B  : 15219 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+	< 147.000B : 17820 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+	< 512.000B : 24057 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+	< 1.782kB  : 19027 ▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+	< 6.208kB  :  3460 ▇▇▇▇
+	< 21.618kB :   600 ▇
+	< 75.281kB :     4 ▇
+	<=262.144kB:   572 ▇
+	--------------------------------------------
+	max: 262.145kB
+
+📂 Allocator type distribution:
+	 MALLOC: 42309
+	 REALLOC: 38409
+	 CALLOC: 628
+	 MMAP: 574
+
+🥇 Top 5 largest allocating locations (by size):
+	- allocate_feature_buffer:/opt/flink-python/dev/worker_profiling/operator_binding_smoke.py:49 -> 149.947MB
+	- <stack trace unavailable> -> 10.734MB
+	- process_bundle:/usr/local/lib/python3.11/site-packages/apache_beam/runners/worker/sdk_worker.py:703 -> 10.272MB
+	- process_bundle:/usr/local/lib/python3.11/site-packages/apache_beam/runners/worker/sdk_worker.py:705 -> 8.471MB
+	- create_monitoring_info:/usr/local/lib/python3.11/site-packages/apache_beam/metrics/monitoring_infos.py:396 -> 6.656MB
+
+🥇 Top 5 largest allocating locations (by number of allocations):
+	- consume_request_iterator:/usr/local/lib/python3.11/site-packages/grpc/_channel.py:311 -> 13738
+	- create_monitoring_info:/usr/local/lib/python3.11/site-packages/apache_beam/metrics/monitoring_infos.py:396 -> 12606
+	- <stack trace unavailable> -> 11735
+	- process_bundle:/usr/local/lib/python3.11/site-packages/apache_beam/runners/worker/sdk_worker.py:705 -> 9168
+	- wait:/usr/local/lib/python3.11/threading.py:320 -> 6587
+
+🥇 Top 5 allocating modules (by size):
+	- dev: 149.947MB total | 572 allocations
+	- apache_beam: 30.805MB total | 45426 allocations
+	- <root>: 10.735MB total | 11737 allocations
+	- grpc: 7.321MB total | 24148 allocations
+	- _memray_attach_hook: 6.024kB total | 15 allocations
+
+🥇 Top 5 allocating modules (by number of allocations):
+	- apache_beam: 30.805MB total | 45426 allocations
+	- grpc: 7.321MB total | 24148 allocations
+	- <root>: 10.735MB total | 11737 allocations
+	- dev: 149.947MB total | 572 allocations
+	- pyflink: 2.024kB total | 22 allocations

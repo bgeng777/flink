@@ -72,7 +72,7 @@ export class TaskManagerProfilerComponent implements OnInit, OnDestroy {
   attachRiskAccepted = false;
 
   get memoryAvailable(): boolean {
-    return this.pythonWorkers.some(worker => worker.id === this.workerId && worker.memoryProfilingAvailable);
+    return this.pythonWorkers.some(worker => worker.id === this.workerId && worker.memoryAttachAvailable);
   }
 
   includeIdle = false;
