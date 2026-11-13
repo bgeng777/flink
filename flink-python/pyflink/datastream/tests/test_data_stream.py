@@ -1833,6 +1833,65 @@ class CommonDataStreamTests(PyFlinkTestCase):
             actual = [result for result in results]
             self.assert_equals_sorted(expected, actual)
 
+    def test_execute_and_collect_null_nested_fields(self):
+        # A NULL nested composite must come back as None. An empty list stays [].
+        self.addCleanup(self.env.set_parallelism, self.env.get_parallelism())
+        self.env.set_parallelism(1)
+
+        def collect(values, type_info):
+            ds = self.env.from_collection(values, type_info=type_info)
+            with ds.execute_and_collect() as results:
+                return [result for result in results]
+
+        nested_row = Types.ROW_NAMED(['x'], [Types.INT()])
+        self.assertEqual(
+            [Row(nested=None), Row(nested=Row(x=1))],
+            collect([Row(nested=None), Row(nested=Row(x=1))],
+                    Types.ROW_NAMED(['nested'], [nested_row])))
+
+        self.assertEqual(
+            [Row(items=None), Row(items=[]), Row(items=[1.0, 2.5])],
+            collect([Row(items=None), Row(items=[]), Row(items=[1.0, 2.5])],
+                    Types.ROW_NAMED(['items'], [Types.LIST(Types.DOUBLE())])))
+
+        self.assertEqual(
+            [Row(attrs=None), Row(attrs={}), Row(attrs={'a': 1})],
+            collect([Row(attrs=None), Row(attrs={}), Row(attrs={'a': 1})],
+                    Types.ROW_NAMED(['attrs'], [Types.MAP(Types.STRING(), Types.INT())])))
+
+        self.assertEqual(
+            [Row(values=None), Row(values=[]), Row(values=['a', None])],
+            collect([Row(values=None), Row(values=[]), Row(values=['a', None])],
+                    Types.ROW_NAMED(['values'], [Types.OBJECT_ARRAY(Types.STRING())])))
+        self.assertEqual(
+            [Row(values=None), Row(values=[]), Row(values=[1, None])],
+            collect([Row(values=None), Row(values=[]), Row(values=[1, None])],
+                    Types.ROW_NAMED(['values'], [Types.BASIC_ARRAY(Types.INT())])))
+        self.assertEqual(
+            [Row(values=None), Row(values=[]), Row(values=[1, 2])],
+            collect([Row(values=None), Row(values=[]), Row(values=[1, 2])],
+                    Types.ROW_NAMED(['values'], [Types.PRIMITIVE_ARRAY(Types.INT())])))
+
+        # A tuple cannot itself contain a null field. A NULL collection nested in
+        # its row field still has to come back as None.
+        self.assertEqual(
+            [(Row(items=None),), (Row(items=[]),)],
+            collect([(Row(items=None),), (Row(items=[]),)],
+                    Types.TUPLE([Types.ROW_NAMED(['items'], [Types.LIST(Types.INT())])])))
+
+        # The same NULL fields one level down, plus a NULL row field.
+        inner = Types.ROW_NAMED(
+            ['nested', 'items', 'attrs', 'values'],
+            [nested_row, Types.LIST(Types.INT()),
+             Types.MAP(Types.STRING(), Types.INT()),
+             Types.OBJECT_ARRAY(Types.STRING())])
+        null_inner = Row(nested=None, items=None, attrs=None, values=None)
+        present_inner = Row(nested=Row(x=1), items=[], attrs={}, values=[])
+        self.assertEqual(
+            [Row(outer=None), Row(outer=null_inner), Row(outer=present_inner)],
+            collect([Row(outer=None), Row(outer=null_inner), Row(outer=present_inner)],
+                    Types.ROW_NAMED(['outer'], [inner])))
+
     def test_function_with_error(self):
         ds = self.env.from_collection([('a', 0), ('b', 0), ('c', 1), ('d', 1), ('e', 1)],
                                       type_info=Types.ROW([Types.STRING(), Types.INT()]))

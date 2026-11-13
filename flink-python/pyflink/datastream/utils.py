@@ -62,7 +62,23 @@ def convert_to_python_obj(data, type_info):
         return pickled_bytes_to_python_obj(pickled_bytes, type_info)
 
 
+def _is_pickled_null(data):
+    # The TypeInformation encoder pickles NULL as None. Empty bytes are the
+    # other NULL marker already recognized for row and tuple fields. An empty
+    # collection is pickled as an empty container, so it is not NULL.
+    if isinstance(data, (bytes, bytearray)):
+        if len(data) == 0:
+            return True
+        try:
+            return pickle.loads(data) is None
+        except (pickle.UnpicklingError, EOFError, ValueError, TypeError, IndexError):
+            return False
+    return False
+
+
 def pickled_bytes_to_python_obj(data, type_info):
+    if isinstance(type_info, (RowTypeInfo, TupleTypeInfo)) and _is_pickled_null(data):
+        return None
     if isinstance(type_info, RowTypeInfo):
         row_kind = RowKind(int.from_bytes(data[0], 'little'))
         field_data_with_types = zip(list(data[1:]), type_info.get_field_types())
@@ -86,6 +102,10 @@ def pickled_bytes_to_python_obj(data, type_info):
         return tuple(fields)
     else:
         data = pickle.loads(data)
+        if data is None and isinstance(type_info, (
+                BasicArrayTypeInfo, PrimitiveArrayTypeInfo, ObjectArrayTypeInfo,
+                MapTypeInfo, ListTypeInfo)):
+            return None
         if type_info == Types.SQL_TIME():
             seconds, microseconds = divmod(data, 10 ** 6)
             minutes, seconds = divmod(seconds, 60)
